@@ -1,0 +1,1096 @@
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const path = require('path');
+const fs = require('fs');
+const { execFile } = require('child_process');
+const cors = require('cors');
+
+const app = express();
+const CORS_ORIGIN = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()).filter(Boolean)
+  : true;
+app.use(cors({ origin: CORS_ORIGIN }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ─────────────────────────────────────────────
+//  MongoDB CONNECTION
+// ─────────────────────────────────────────────
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/dulceria';
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('✅  MongoDB conectado:', MONGODB_URI))
+  .catch(err => console.error('❌  Error MongoDB:', err.message));
+
+// ─────────────────────────────────────────────
+//  BACKUPS AUTOMÁTICOS (snapshot con mongodump)
+// ─────────────────────────────────────────────
+const BACKUP_ON_WRITE = process.env.BACKUP_ON_WRITE !== 'false';
+const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, 'backups');
+const BACKUP_DEBOUNCE_MS = Number(process.env.BACKUP_DEBOUNCE_MS || 2000);
+const BACKUP_KEEP_FILES = Number(process.env.BACKUP_KEEP_FILES || 80);
+
+let backupTimer = null;
+let backupRunning = false;
+let backupPending = false;
+
+function ensureBackupDir() {
+  if (!fs.existsSync(BACKUP_DIR)) {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  }
+}
+
+function getBackupFileName() {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  return `dulceria_${ts}.archive.gz`;
+}
+
+function pruneOldBackups() {
+  try {
+    const files = fs
+      .readdirSync(BACKUP_DIR)
+      .filter(name => name.endsWith('.archive.gz'))
+      .map(name => ({
+        name,
+        fullPath: path.join(BACKUP_DIR, name),
+        mtime: fs.statSync(path.join(BACKUP_DIR, name)).mtimeMs,
+      }))
+      .sort((a, b) => b.mtime - a.mtime);
+
+    const toDelete = files.slice(BACKUP_KEEP_FILES);
+    for (const f of toDelete) {
+      fs.unlinkSync(f.fullPath);
+    }
+  } catch (err) {
+    console.log('⚠️ No se pudo limpiar backups antiguos:', err.message);
+  }
+}
+
+function runMongoBackup(reason = 'api-write') {
+  if (!BACKUP_ON_WRITE) return;
+  if (backupRunning) {
+    backupPending = true;
+    return;
+  }
+
+  ensureBackupDir();
+  backupRunning = true;
+  const outputFile = path.join(BACKUP_DIR, getBackupFileName());
+  const args = ['--uri', MONGODB_URI, `--archive=${outputFile}`, '--gzip'];
+
+  execFile('mongodump', args, (err) => {
+    backupRunning = false;
+
+    if (err) {
+      console.log(`⚠️ Backup falló (${reason}):`, err.message);
+    } else {
+      console.log(`💾 Backup creado (${reason}): ${outputFile}`);
+      pruneOldBackups();
+    }
+
+    if (backupPending) {
+      backupPending = false;
+      runMongoBackup('pending-write');
+    }
+  });
+}
+
+function scheduleMongoBackup(reason = 'api-write') {
+  if (!BACKUP_ON_WRITE) return;
+  if (backupTimer) clearTimeout(backupTimer);
+  backupTimer = setTimeout(() => {
+    backupTimer = null;
+    runMongoBackup(reason);
+  }, BACKUP_DEBOUNCE_MS);
+}
+
+// ─────────────────────────────────────────────
+//  MODELOS
+// ─────────────────────────────────────────────
+
+/** Catálogo de dulces */
+const candySchema = new mongoose.Schema({
+  nombre:         { type: String, required: true, trim: true },
+  piezasPorBolsa: { type: Number, required: true, min: 1 },
+  costoPorBolsa:  { type: Number, required: true, min: 0 },
+  precioUnitario: { type: Number, required: true, min: 0 },
+  activo:         { type: Boolean, default: true },
+}, { timestamps: true });
+const Candy = mongoose.model('Candy', candySchema);
+
+/**
+ * Bolsa = un lote de compra de un dulce específico.
+ * Se lleva control FIFO de piezas vendidas por lote.
+ */
+const bolsaSchema = new mongoose.Schema({
+  candyId:          { type: mongoose.Schema.Types.ObjectId, ref: 'Candy', required: true },
+  cantidadBolsas:   { type: Number, default: 1 },
+  costoTotal:       { type: Number, required: true },   // costoPorBolsa * cantidadBolsas
+  piezasTotales:    { type: Number, required: true },   // piezasPorBolsa * cantidadBolsas
+  piezasVendidas:   { type: Number, default: 0 },       // Solo de ventas reales
+  piezasEntregadas: { type: Number, default: 0 },       // Entregadas a la compañera
+  dineroRecuperado: { type: Number, default: 0 },       // piezasVendidas * precioUnitario (solo vendidas)
+  gananciaAcumulada:{ type: Number, default: 0 },       // dineroRecuperado - costoTotal
+  recuperada:       { type: Boolean, default: false },
+  fechaCompra:      { type: Date, default: Date.now },
+  activa:           { type: Boolean, default: true },
+  notas:            String,
+}, { timestamps: true });
+const Bolsa = mongoose.model('Bolsa', bolsaSchema);
+
+/** Detalle de un dulce dentro de una venta diaria */
+const detalleSchema = new mongoose.Schema({
+  candyId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Candy' },
+  nombreDulce:    String,
+  cantidadVendida:{ type: Number, default: 0 },
+  precioUnitario: Number,
+  subtotal:       Number,
+});
+
+/** Registro de ventas de un día */
+const ventaSchema = new mongoose.Schema({
+  fecha:              { type: Date, default: Date.now },
+  diaSemana:          Number,   // 0=Dom … 6=Sáb
+  source:             { type: String, enum: ['admin', 'companera'], default: 'admin' },
+  detalles:           [detalleSchema],
+  totalEsperado:      { type: Number, required: true },
+  totalRecibido:      { type: Number, required: true },
+  diferencia:         Number,   // recibido - esperado (+ = sobrante, - = faltante)
+  comisionCalculada:  Number,   // totalEsperado * 0.12
+  semanaId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Semana' },
+  notas:              String,
+}, { timestamps: true });
+const Venta = mongoose.model('Venta', ventaSchema);
+
+/** Semana de trabajo (Lun 00:00 → Vie 18:00) */
+const semanaSchema = new mongoose.Schema({
+  fechaInicio:   { type: Date, required: true },
+  fechaFin:      { type: Date, required: true },
+  totalVentas:   { type: Number, default: 0 },
+  totalComision: { type: Number, default: 0 },
+  numeroDias:    { type: Number, default: 0 },
+  pagado:        { type: Boolean, default: false },
+  fechaPago:     Date,
+}, { timestamps: true });
+const Semana = mongoose.model('Semana', semanaSchema);
+
+/**
+ * Distribución = Producto entregado a la compañera de ventas.
+ * Se registra: qué dulce, cuántas piezas, cuándo.
+ * Se estima cuánta ganancia devería regresar basado en precio unitario.
+ */
+const distribucionSchema = new mongoose.Schema({
+  fecha:             { type: Date, default: Date.now },
+  candyId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Candy', required: true },
+  cantidad:          { type: Number, required: true, min: 1 },
+  precioUnitario:    { type: Number, required: true, min: 0 },
+  subtotal:          { type: Number, required: true },        // cantidad * precioUnitario (costo)
+  gananciasEsperada: { type: Number, required: true },        // subtotal * 0.12 (12% comisión)
+  montoDevuelto:     { type: Number, default: 0 },            // dinero que la compañera devolvió
+  pagado:            { type: Boolean, default: false },
+  notas:             String,
+  semanaId:          { type: mongoose.Schema.Types.ObjectId, ref: 'Semana' },
+}, { timestamps: true });
+const Distribucion = mongoose.model('Distribucion', distribucionSchema);
+
+// ─────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────
+const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+
+function getWeekBounds(date = new Date()) {
+  const day = date.getDay();                        // 0=Dom
+  const daysFromMon = day === 0 ? 6 : day - 1;
+  const monday = new Date(date);
+  monday.setDate(monday.getDate() - daysFromMon);
+  monday.setHours(0, 0, 0, 0);
+  const friday = new Date(monday);
+  friday.setDate(friday.getDate() + 4);
+  friday.setHours(18, 0, 0, 0);
+  return { monday, friday };
+}
+
+async function getOrCreateCurrentWeek() {
+  const { monday, friday } = getWeekBounds();
+  let semana = await Semana.findOne({ fechaInicio: monday, pagado: false });
+  if (!semana) semana = await Semana.create({ fechaInicio: monday, fechaFin: friday });
+  return semana;
+}
+
+/**
+ * Actualiza inventario de bolsas (FIFO) al registrar una VENTA.
+ * Atribuye piezas vendidas al lote más antiguo disponible primero.
+ */
+async function updateBolsas(candyId, cantidadVendida, precioUnitario) {
+  const bolsas = await Bolsa.find({
+    candyId,
+    activa: true,
+    $expr: { $lt: [
+      { $add: ['$piezasVendidas', '$piezasEntregadas'] },
+      '$piezasTotales'
+    ] },
+  }).sort('fechaCompra');
+
+  let restante = cantidadVendida;
+  for (const b of bolsas) {
+    if (restante <= 0) break;
+    const usadas = b.piezasVendidas + b.piezasEntregadas;
+    const disponibles = b.piezasTotales - usadas;
+    const deEsta = Math.min(restante, disponibles);
+    b.piezasVendidas    += deEsta;
+    b.dineroRecuperado   = parseFloat((b.piezasVendidas * precioUnitario).toFixed(2));
+    b.gananciaAcumulada  = parseFloat((b.dineroRecuperado - b.costoTotal).toFixed(2));
+    b.recuperada         = b.dineroRecuperado >= b.costoTotal;
+    await b.save();
+    restante -= deEsta;
+  }
+}
+
+/**
+ * Actualiza inventario de bolsas al registrar una DISTRIBUCIÓN a la compañera.
+ * Marca piezas como entregadas (no vendidas aún).
+ */
+async function addDistribution(candyId, cantidadEntregada) {
+  const bolsas = await Bolsa.find({
+    candyId,
+    activa: true,
+    $expr: { $lt: [
+      { $add: ['$piezasVendidas', '$piezasEntregadas'] },
+      '$piezasTotales'
+    ] },
+  }).sort('fechaCompra');
+
+  let restante = cantidadEntregada;
+  for (const b of bolsas) {
+    if (restante <= 0) break;
+    const usadas = b.piezasVendidas + b.piezasEntregadas;
+    const disponibles = b.piezasTotales - usadas;
+    const deEsta = Math.min(restante, disponibles);
+    b.piezasEntregadas += deEsta;
+    await b.save();
+    restante -= deEsta;
+  }
+}
+
+// Dispara backup automático en cada escritura HTTP exitosa.
+app.use('/api', (req, res, next) => {
+  if (!BACKUP_ON_WRITE) return next();
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+
+  res.on('finish', () => {
+    if (res.statusCode >= 200 && res.statusCode < 400) {
+      scheduleMongoBackup(`${req.method} ${req.originalUrl}`);
+    }
+  });
+
+  next();
+});
+
+// ─────────────────────────────────────────────
+//  ROUTE: SEED
+// ─────────────────────────────────────────────
+app.post('/api/seed', async (req, res) => {
+  try {
+    const count = await Candy.countDocuments();
+    if (count > 0) return res.json({ ok: false, msg: 'Ya hay dulces registrados' });
+
+    /*
+     * Precios sugeridos calculados con margen ~50-130% sobre costo/pieza.
+     * El usuario puede modificarlos en la sección "Catálogo".
+     */
+    const dulces = [
+      { nombre: 'Palitos Hot Chili',  piezasPorBolsa: 25,  costoPorBolsa: 24,   precioUnitario: 2   },
+      { nombre: 'Chidas Donitas',     piezasPorBolsa: 10,  costoPorBolsa: 48,   precioUnitario: 8   },
+      { nombre: 'Trueno Pop',         piezasPorBolsa: 50,  costoPorBolsa: 43.5, precioUnitario: 2   },
+      { nombre: 'Bubalo',             piezasPorBolsa: 47,  costoPorBolsa: 44.5, precioUnitario: 2   },
+      { nombre: 'Oblea Coronado',     piezasPorBolsa: 10,  costoPorBolsa: 19.5, precioUnitario: 3   },
+      { nombre: 'Carlos V',           piezasPorBolsa: 20,  costoPorBolsa: 54.5, precioUnitario: 5   },
+      { nombre: 'Pelón Mini',         piezasPorBolsa: 18,  costoPorBolsa: 59.5, precioUnitario: 5   },
+      { nombre: 'PicaGomas',          piezasPorBolsa: 100, costoPorBolsa: 65.5, precioUnitario: 1.5 },
+      { nombre: 'Rica Sandía',        piezasPorBolsa: 40,  costoPorBolsa: 55,   precioUnitario: 3   },
+      { nombre: 'Chipileta',          piezasPorBolsa: 30,  costoPorBolsa: 69.5, precioUnitario: 4   },
+    ];
+    await Candy.insertMany(dulces);
+    res.json({ ok: true, msg: `${dulces.length} dulces cargados`, dulces });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+//  ROUTES: CANDIES (Catálogo)
+// ─────────────────────────────────────────────
+app.get('/api/candies', async (req, res) => {
+  try {
+    const candies = await Candy.find({ activo: true }).sort('nombre');
+    res.json(candies);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/candies', async (req, res) => {
+  try {
+    const candy = await Candy.create(req.body);
+    res.status(201).json(candy);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/candies/:id', async (req, res) => {
+  try {
+    const candy = await Candy.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    if (!candy) return res.status(404).json({ error: 'No encontrado' });
+    res.json(candy);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/candies/:id', async (req, res) => {
+  try {
+    await Candy.findByIdAndUpdate(req.params.id, { activo: false });
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/** Cálculo de precios sugeridos con análisis de margen */
+app.get('/api/candies/precios-sugeridos', async (req, res) => {
+  try {
+    const candies = await Candy.find({ activo: true });
+    const sugerencias = candies.map(c => {
+      const cpp = c.costoPorBolsa / c.piezasPorBolsa;
+      let precio;
+      if (cpp < 1)   precio = 2;
+      else if (cpp < 2)   precio = Math.ceil(cpp * 2.5 * 2) / 2;
+      else if (cpp < 3.5) precio = Math.ceil(cpp * 2.0 * 2) / 2;
+      else                precio = Math.ceil(cpp * 1.8 * 2) / 2;
+
+      const ingresoBruto = precio * c.piezasPorBolsa;
+      return {
+        _id: c._id,
+        nombre: c.nombre,
+        costoPorPieza:   +cpp.toFixed(2),
+        precioActual:    c.precioUnitario,
+        precioSugerido:  precio,
+        ingresoBruto:    +ingresoBruto.toFixed(2),
+        gananciaTotal:   +(ingresoBruto - c.costoPorBolsa).toFixed(2),
+        margen:          +(((ingresoBruto - c.costoPorBolsa) / c.costoPorBolsa) * 100).toFixed(1),
+        piezasPorBolsa:  c.piezasPorBolsa,
+      };
+    });
+    res.json(sugerencias);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────
+//  ROUTES: BOLSAS (Inventario)
+// ─────────────────────────────────────────────
+app.get('/api/bolsas', async (req, res) => {
+  try {
+    const bolsas = await Bolsa.find({ activa: true }).populate('candyId').sort('-fechaCompra');
+    res.json(bolsas);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bolsas', async (req, res) => {
+  try {
+    const { candyId, cantidadBolsas = 1, notas } = req.body;
+    const candy = await Candy.findById(candyId);
+    if (!candy) return res.status(404).json({ error: 'Dulce no encontrado' });
+
+    const bolsa = await Bolsa.create({
+      candyId,
+      cantidadBolsas: +cantidadBolsas,
+      costoTotal:    candy.costoPorBolsa  * cantidadBolsas,
+      piezasTotales: candy.piezasPorBolsa * cantidadBolsas,
+      notas,
+    });
+    await bolsa.populate('candyId');
+    res.status(201).json(bolsa);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/bolsas/:id', async (req, res) => {
+  try {
+    await Bolsa.findByIdAndUpdate(req.params.id, { activa: false });
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────
+//  ROUTES: VENTAS
+// ─────────────────────────────────────────────
+app.get('/api/ventas', async (req, res) => {
+  try {
+    const { limite = 50 } = req.query;
+    const ventas = await Venta.find().sort('-fecha').limit(+limite);
+    res.json(ventas);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/ventas/hoy', async (req, res) => {
+  try {
+    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
+    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const ventas = await Venta.find({ fecha: { $gte: inicio, $lte: fin } }).sort('-fecha');
+    const totales = ventas.reduce((acc, v) => ({
+      esperado:   acc.esperado   + v.totalEsperado,
+      recibido:   acc.recibido   + v.totalRecibido,
+      diferencia: acc.diferencia + v.diferencia,
+      comision:   acc.comision   + v.comisionCalculada,
+    }), { esperado: 0, recibido: 0, diferencia: 0, comision: 0 });
+    res.json({ ventas, totales });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/ventas', async (req, res) => {
+  try {
+    const { detalles, totalRecibido, notas } = req.body;
+    if (!detalles?.length) return res.status(400).json({ error: 'Sin detalles de venta' });
+
+    const semana = await getOrCreateCurrentWeek();
+    const ahora  = new Date();
+    let totalEsperado = 0;
+    const detallesOk = [];
+
+    for (const d of detalles) {
+      if (!d.cantidadVendida || +d.cantidadVendida <= 0) continue;
+      const candy = await Candy.findById(d.candyId);
+      if (!candy) continue;
+      const subtotal = +d.cantidadVendida * candy.precioUnitario;
+      totalEsperado += subtotal;
+      detallesOk.push({
+        candyId:         candy._id,
+        nombreDulce:     candy.nombre,
+        cantidadVendida: +d.cantidadVendida,
+        precioUnitario:  candy.precioUnitario,
+        subtotal,
+      });
+    }
+
+    if (totalEsperado === 0) return res.status(400).json({ error: 'No hay dulces para registrar' });
+
+    const diferencia         = parseFloat((totalRecibido - totalEsperado).toFixed(2));
+    const comisionCalculada  = parseFloat((totalEsperado * 0.12).toFixed(2));
+
+    const venta = await Venta.create({
+      fecha: ahora,
+      diaSemana: ahora.getDay(),
+      detalles: detallesOk,
+      totalEsperado,
+      totalRecibido: +totalRecibido,
+      diferencia,
+      comisionCalculada,
+      semanaId: semana._id,
+      notas,
+    });
+
+    // Actualizar totales de semana
+    await Semana.findByIdAndUpdate(semana._id, {
+      $inc: { totalVentas: totalEsperado, totalComision: comisionCalculada, numeroDias: 1 },
+    });
+
+    // Actualizar inventario FIFO
+    for (const d of detallesOk) {
+      await updateBolsas(d.candyId, d.cantidadVendida, d.precioUnitario);
+    }
+
+    res.status(201).json(venta);
+  } catch (e) {
+    console.error('POST /api/ventas:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+//  DELETE VENTA: Revertir inventario y semana
+// ─────────────────────────────────────────────
+app.delete('/api/ventas/:id', async (req, res) => {
+  try {
+    const venta = await Venta.findById(req.params.id);
+    if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
+
+    // 1. Revertir piezasVendidas en bolsas (FIFO inverso)
+    for (const d of venta.detalles) {
+      if (!d.cantidadVendida || d.cantidadVendida <= 0) continue;
+      const candy = await Candy.findById(d.candyId);
+      if (!candy) continue;
+
+      const bolsas = await Bolsa.find({
+        candyId: d.candyId,
+        activa: true,
+        piezasVendidas: { $gt: 0 },
+      }).sort('-fechaCompra');
+
+      let restante = d.cantidadVendida;
+      for (const b of bolsas) {
+        if (restante <= 0) break;
+        const devolver = Math.min(restante, b.piezasVendidas);
+        b.piezasVendidas   -= devolver;
+        b.dineroRecuperado  = parseFloat((b.piezasVendidas * d.precioUnitario).toFixed(2));
+        b.gananciaAcumulada = b.piezasVendidas > 0
+          ? parseFloat((b.dineroRecuperado - b.costoTotal).toFixed(2))
+          : 0;
+        b.recuperada        = b.dineroRecuperado >= b.costoTotal;
+        await b.save();
+        restante -= devolver;
+      }
+    }
+
+    // 2. Revertir totales de la semana
+    if (venta.semanaId) {
+      await Semana.findByIdAndUpdate(venta.semanaId, {
+        $inc: {
+          totalVentas:   -venta.totalEsperado,
+          totalComision: -venta.comisionCalculada,
+          numeroDias:    -1,
+        },
+      });
+    }
+
+    // 3. Eliminar la venta
+    await Venta.findByIdAndDelete(req.params.id);
+
+    res.json({ ok: true, msg: 'Venta eliminada y stock restaurado' });
+  } catch (e) {
+    console.error('DELETE /api/ventas:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+//  ROUTES: DISTRIBUCIONES (Entregas a Compañera)
+// ─────────────────────────────────────────────
+app.get('/api/distribuciones', async (req, res) => {
+  try {
+    const distribuciones = await Distribucion.find()
+      .populate('candyId')
+      .sort('-fecha')
+      .limit(100);
+    res.json(distribuciones);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/distribuciones/hoy', async (req, res) => {
+  try {
+    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
+    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const distribuciones = await Distribucion.find({ fecha: { $gte: inicio, $lte: fin } })
+      .populate('candyId')
+      .sort('-fecha');
+    const totales = distribuciones.reduce((acc, d) => ({
+      cantidad:         acc.cantidad + d.cantidad,
+      subtotal:         acc.subtotal + d.subtotal,
+      gananciasEsperada: acc.gananciasEsperada + d.gananciasEsperada,
+      montoDevuelto:    acc.montoDevuelto + d.montoDevuelto,
+    }), { cantidad: 0, subtotal: 0, gananciasEsperada: 0, montoDevuelto: 0 });
+    res.json({ distribuciones, totales });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/distribuciones', async (req, res) => {
+  try {
+    const { candyId, cantidad, notas } = req.body;
+    if (!candyId || !cantidad || +cantidad <= 0) {
+      return res.status(400).json({ error: 'Faltan datos: candyId, cantidad' });
+    }
+
+    const candy = await Candy.findById(candyId);
+    if (!candy) return res.status(404).json({ error: 'Dulce no encontrado' });
+
+    const semana = await getOrCreateCurrentWeek();
+    const precioUnitario = candy.precioUnitario;
+    const subtotal = parseFloat((cantidad * precioUnitario).toFixed(2));
+    const gananciasEsperada = parseFloat((subtotal * 0.12).toFixed(2));  // 12%
+
+    const distribucion = await Distribucion.create({
+      fecha: new Date(),
+      candyId,
+      cantidad: +cantidad,
+      precioUnitario,
+      subtotal,
+      gananciasEsperada,
+      semanaId: semana._id,
+      notas,
+    });
+
+    // Marcar como entregadas a la compañera (NO vendidas aún)
+    await addDistribution(candyId, +cantidad);
+
+    await distribucion.populate('candyId');
+    res.status(201).json(distribucion);
+  } catch (e) {
+    console.error('POST /api/distribuciones:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * Quita piezas entregadas del inventario cuando se cancela una distribución.
+ */
+async function removeDistribution(candyId, cantidadEntregada) {
+  const bolsas = await Bolsa.find({
+    candyId,
+    activa: true,
+  }).sort('-fechaCompra');
+
+  let restante = cantidadEntregada;
+  for (const b of bolsas) {
+    if (restante <= 0) break;
+    const aRestar = Math.min(restante, b.piezasEntregadas);
+    b.piezasEntregadas -= aRestar;
+    await b.save();
+    restante -= aRestar;
+  }
+}
+
+app.delete('/api/distribuciones/:id', async (req, res) => {
+  try {
+    const distribucion = await Distribucion.findByIdAndDelete(req.params.id);
+    if (!distribucion) return res.status(404).json({ error: 'No encontrada' });
+    
+    // Revertir las piezas entregadas en el inventario
+    await removeDistribution(distribucion.candyId, distribucion.cantidad);
+    
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/distribuciones/:id', async (req, res) => {
+  try {
+    const { montoDevuelto, notas } = req.body;
+    const distribucion = await Distribucion.findByIdAndUpdate(
+      req.params.id,
+      { montoDevuelto: +montoDevuelto, notas, pagado: +montoDevuelto >= req.body.gananciasEsperada },
+      { new: true }
+    );
+    if (!distribucion) return res.status(404).json({ error: 'No encontrada' });
+    await distribucion.populate('candyId');
+    res.json(distribucion);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/**
+ * MIGRATION: Corrige datos antiguos donde distribuciones (sin vender)
+ * estaban en piezasVendidas. Las mueve a piezasEntregadas si dineroRecuperado == 0.
+ */
+app.post('/api/bolsas/migrate', async (req, res) => {
+  try {
+    const bolsas = await Bolsa.find({ dineroRecuperado: 0, piezasVendidas: { $gt: 0 } });
+    let corregidas = 0;
+    for (const b of bolsas) {
+      b.piezasEntregadas = (b.piezasEntregadas || 0) + b.piezasVendidas;
+      b.piezasVendidas = 0;
+      await b.save();
+      corregidas++;
+    }
+    res.json({ ok: true, msg: `${corregidas} bolsas corregidas`, actualizadas: corregidas });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+//  ROUTES: SEMANAS
+// ─────────────────────────────────────────────
+app.get('/api/semanas', async (req, res) => {
+  try {
+    const semanas = await Semana.find().sort('-fechaInicio').limit(12);
+    res.json(semanas);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/semanas/actual', async (req, res) => {
+  try {
+    const semana = await getOrCreateCurrentWeek();
+    const ventas = await Venta.find({ semanaId: semana._id }).sort('fecha');
+    res.json({ semana, ventas });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/semanas/:id/cerrar', async (req, res) => {
+  try {
+    const semana = await Semana.findByIdAndUpdate(
+      req.params.id,
+      { pagado: true, fechaPago: new Date() },
+      { new: true }
+    );
+    if (!semana) return res.status(404).json({ error: 'Semana no encontrada' });
+    res.json(semana);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────
+//  ROUTE: DASHBOARD
+// ─────────────────────────────────────────────
+app.get('/api/dashboard', async (req, res) => {
+  try {
+    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
+    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+
+    const ventasHoy = await Venta.find({ fecha: { $gte: inicio, $lte: fin } });
+    const totalHoy     = ventasHoy.reduce((a, v) => a + v.totalEsperado, 0);
+    const comisionHoy  = ventasHoy.reduce((a, v) => a + v.comisionCalculada, 0);
+    const recibidoHoy  = ventasHoy.reduce((a, v) => a + v.totalRecibido, 0);
+
+    const semana = await getOrCreateCurrentWeek();
+
+    const bolsas = await Bolsa.find({ activa: true }).populate('candyId').sort('fechaCompra');
+
+    // Ventas últimos 7 días para gráfica
+    const hace7 = new Date(); hace7.setDate(hace7.getDate() - 6); hace7.setHours(0, 0, 0, 0);
+    const ventas7 = await Venta.find({ fecha: { $gte: hace7 } });
+    const porDia = {};
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(hace7); d.setDate(d.getDate() + i);
+      porDia[d.toISOString().slice(0, 10)] = 0;
+    }
+    for (const v of ventas7) {
+      const k = v.fecha.toISOString().slice(0, 10);
+      if (k in porDia) porDia[k] += v.totalEsperado;
+    }
+
+    res.json({
+      hoy: {
+        totalVentas: +totalHoy.toFixed(2),
+        recibido:    +recibidoHoy.toFixed(2),
+        comision:    +comisionHoy.toFixed(2),
+        registros:   ventasHoy.length,
+      },
+      semana: {
+        _id:          semana._id,
+        inicio:       semana.fechaInicio,
+        fin:          semana.fechaFin,
+        totalVentas:  semana.totalVentas,
+        totalComision:semana.totalComision,
+        numeroDias:   semana.numeroDias,
+        pagado:       semana.pagado,
+      },
+      bolsas: bolsas.map(b => ({
+        _id:               b._id,
+        nombre:            b.candyId?.nombre || '—',
+        costoTotal:        b.costoTotal,
+        piezasTotales:     b.piezasTotales,
+        piezasVendidas:    b.piezasVendidas,
+        dineroRecuperado:  b.dineroRecuperado,
+        gananciaAcumulada: b.gananciaAcumulada,
+        recuperada:        b.recuperada,
+        porcentaje:        Math.min(100, +(b.dineroRecuperado / b.costoTotal * 100).toFixed(1)),
+        fechaCompra:       b.fechaCompra,
+      })),
+      grafica7dias: Object.entries(porDia).map(([fecha, total]) => ({ fecha, total: +total.toFixed(2) })),
+    });
+  } catch (e) {
+    console.error('GET /api/dashboard:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+//  ROUTE: RECOMENDACIONES IA
+//  Algoritmo: EMA por día-de-semana + promedio
+//  general como fallback + buffer de seguridad
+// ─────────────────────────────────────────────
+app.get('/api/recomendaciones', async (req, res) => {
+  try {
+    const candies = await Candy.find({ activo: true });
+    const hace30  = new Date(); hace30.setDate(hace30.getDate() - 30);
+
+    // Solo ventas de Lun-Vie
+    const ventas = await Venta.find({
+      fecha:     { $gte: hace30 },
+      diaSemana: { $gte: 1, $lte: 5 },
+    });
+
+    const hoyDia  = new Date().getDay();
+    const ALPHA   = 0.4;  // factor de suavizado EMA
+
+    const recomendaciones = candies.map(candy => {
+      const porDia = {};   // { diaSemana: [cantidades] }
+      let totalVendido = 0, diasConVenta = 0;
+
+      for (const v of ventas) {
+        const det = v.detalles.find(d => d.candyId?.toString() === candy._id.toString());
+        if (det && det.cantidadVendida > 0) {
+          (porDia[v.diaSemana] = porDia[v.diaSemana] || []).push(det.cantidadVendida);
+          totalVendido += det.cantidadVendida;
+          diasConVenta++;
+        }
+      }
+
+      let cantidad = 10, confianza = 'Sin datos', razon = 'Sin historial. Cantidad base sugerida.';
+
+      if (diasConVenta >= 2) {
+        const promGeneral = totalVendido / diasConVenta;
+
+        if (porDia[hoyDia]?.length >= 2) {
+          // EMA sobre el día específico de la semana
+          const datos = porDia[hoyDia];
+          let ema = datos[0];
+          for (let i = 1; i < datos.length; i++) ema = ALPHA * datos[i] + (1 - ALPHA) * ema;
+          cantidad   = Math.ceil(ema * 1.15);
+          confianza  = datos.length >= 4 ? 'Alta' : 'Media';
+          razon      = `EMA α=0.4 sobre ${datos.length} ${DIAS[hoyDia]}s · buffer +15%`;
+        } else {
+          cantidad   = Math.ceil(promGeneral * 1.20);
+          confianza  = diasConVenta >= 5 ? 'Media' : 'Baja';
+          razon      = `Promedio general (${diasConVenta} días) · buffer +20%`;
+        }
+      }
+
+      // Límites razonables
+      cantidad = Math.max(3, Math.min(cantidad, candy.piezasPorBolsa * 3));
+
+      return {
+        candyId:         candy._id,
+        nombre:          candy.nombre,
+        precioUnitario:  candy.precioUnitario,
+        piezasPorBolsa:  candy.piezasPorBolsa,
+        cantidad,
+        ingresoEstimado: +(cantidad * candy.precioUnitario).toFixed(2),
+        confianza,
+        razon,
+        diasConDatos:    diasConVenta,
+      };
+    });
+
+    const totalEstimado = +recomendaciones.reduce((a, r) => a + r.ingresoEstimado, 0).toFixed(2);
+    res.json({
+      recomendaciones,
+      totalEstimado,
+      diaAnalizado: DIAS[hoyDia],
+      fecha: new Date(),
+      algoritmo: 'EMA (α=0.4) por día-de-semana + fallback promedio general',
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────
+//  ROUTES: COMPAÑERA (Vista vendedora)
+//  Estos endpoints son los que usa indexv.html
+// ─────────────────────────────────────────────
+
+const COMPANERA_API_KEY = process.env.COMPANERA_API_KEY || '';
+
+app.use('/api/companera', (req, res, next) => {
+  if (!COMPANERA_API_KEY) return next();
+  const apiKey = req.headers['x-companera-key'];
+  if (apiKey !== COMPANERA_API_KEY) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+});
+
+/**
+ * GET /api/companera/inventario
+ * Devuelve el stock disponible para la compañera:
+ * piezas entregadas - piezas ya registradas como vendidas
+ */
+app.get('/api/companera/inventario', async (req, res) => {
+  try {
+    const candies = await Candy.find({ activo: true }).sort('nombre');
+    const result = [];
+
+    for (const c of candies) {
+      const distribuciones = await Distribucion.find({ candyId: c._id });
+      const totalEntregadas = distribuciones.reduce((a, d) => a + d.cantidad, 0);
+
+      const ventas = await Venta.find({
+        source: 'companera',
+        'detalles.candyId': c._id,
+      });
+      let vendidas = 0;
+      for (const v of ventas) {
+        const det = v.detalles.find(d => d.candyId?.toString() === c._id.toString());
+        if (det) vendidas += det.cantidadVendida;
+      }
+
+      const disponibles = Math.max(0, totalEntregadas - vendidas);
+
+      result.push({
+        _id: c._id,
+        nombre: c.nombre,
+        precioUnitario: c.precioUnitario,
+        totalEntregadas,
+        vendidas,
+        disponibles,
+      });
+    }
+
+    res.json(result.filter(r => r.totalEntregadas > 0));
+  } catch (e) {
+    console.error('GET /api/companera/inventario:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * POST /api/companera/venta
+ * La compañera registra una venta.
+ */
+app.post('/api/companera/venta', async (req, res) => {
+  try {
+    const { detalles, totalRecibido = 0, notas } = req.body;
+    if (!detalles?.length) return res.status(400).json({ error: 'Sin detalles de venta' });
+
+    const semana = await getOrCreateCurrentWeek();
+    const ahora  = new Date();
+    let totalEsperado = 0;
+    const detallesOk = [];
+
+    for (const d of detalles) {
+      if (!d.cantidadVendida || +d.cantidadVendida <= 0) continue;
+      const candy = await Candy.findById(d.candyId);
+      if (!candy) continue;
+      const subtotal = +d.cantidadVendida * candy.precioUnitario;
+      totalEsperado += subtotal;
+      detallesOk.push({
+        candyId:         candy._id,
+        nombreDulce:     candy.nombre,
+        cantidadVendida: +d.cantidadVendida,
+        precioUnitario:  candy.precioUnitario,
+        subtotal,
+      });
+    }
+
+    if (totalEsperado === 0) return res.status(400).json({ error: 'No hay dulces para registrar' });
+
+    const diferencia        = parseFloat((+totalRecibido - totalEsperado).toFixed(2));
+    const comisionCalculada = parseFloat((totalEsperado * 0.12).toFixed(2));
+
+    const venta = await Venta.create({
+      fecha: ahora,
+      diaSemana: ahora.getDay(),
+      source: 'companera',
+      detalles: detallesOk,
+      totalEsperado,
+      totalRecibido: +totalRecibido,
+      diferencia,
+      comisionCalculada,
+      semanaId: semana._id,
+      notas,
+    });
+
+    await Semana.findByIdAndUpdate(semana._id, {
+      $inc: { totalVentas: totalEsperado, totalComision: comisionCalculada, numeroDias: 1 },
+    });
+
+    for (const d of detallesOk) {
+      await updateBolsas(d.candyId, d.cantidadVendida, d.precioUnitario);
+    }
+
+    res.status(201).json(venta);
+  } catch (e) {
+    console.error('POST /api/companera/venta:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/companera/ventas/hoy
+ * Las ventas de hoy + totales
+ */
+app.get('/api/companera/ventas/hoy', async (req, res) => {
+  try {
+    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
+    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const ventas = await Venta.find({
+      source: 'companera',
+      fecha: { $gte: inicio, $lte: fin },
+    }).sort('-fecha');
+    const totales = ventas.reduce((acc, v) => ({
+      esperado: acc.esperado + v.totalEsperado,
+      comision: acc.comision + v.comisionCalculada,
+    }), { esperado: 0, comision: 0 });
+    res.json({ ventas, totales });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * GET /api/companera/comision
+ * Comisión acumulada de la semana actual
+ */
+app.get('/api/companera/comision', async (req, res) => {
+  try {
+    const semana = await getOrCreateCurrentWeek();
+    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
+    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const ventasHoy = await Venta.find({
+      source: 'companera',
+      fecha: { $gte: inicio, $lte: fin },
+    });
+    const ventasSemana = await Venta.find({
+      source: 'companera',
+      semanaId: semana._id,
+    });
+
+    const totalVentasSemana = ventasSemana.reduce((a, v) => a + v.totalEsperado, 0);
+    const totalComisionSemana = ventasSemana.reduce((a, v) => a + v.comisionCalculada, 0);
+    const comisionHoy = ventasHoy.reduce((a, v) => a + v.comisionCalculada, 0);
+
+    res.json({
+      semana: {
+        totalVentas:   +totalVentasSemana.toFixed(2),
+        totalComision: +totalComisionSemana.toFixed(2),
+        numeroDias:    new Set(ventasSemana.map(v => new Date(v.fecha).toDateString())).size,
+        inicio:        semana.fechaInicio,
+        fin:           semana.fechaFin,
+      },
+      hoy: {
+        comision: +comisionHoy.toFixed(2),
+        ventas:   ventasHoy.length,
+      },
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────
+//  CATCH-ALL → frontend
+// ─────────────────────────────────────────────
+app.get('/vendedora', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'indexv.html'));
+});
+
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+console.log("🔥 LLEGÓ ANTES DE app.listen");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server en http://0.0.0.0:${PORT}`);
+});
+mongoose.connection.once('open', () => {
+  console.log('🟢 Mongo listo, ejecutando migración...');
+
+  setTimeout(async () => {
+    try {
+      const distribuciones = await Distribucion.find();
+
+      const distribucionPorCandy = {};
+      for (const d of distribuciones) {
+        const candyId = d.candyId.toString();
+        distribucionPorCandy[candyId] = (distribucionPorCandy[candyId] || 0) + d.cantidad;
+      }
+
+      let corregidas = 0;
+      for (const [candyId, totalDistribuido] of Object.entries(distribucionPorCandy)) {
+        const bolsas = await Bolsa.find({ candyId });
+        for (const b of bolsas) {
+          if (b.piezasVendidas >= totalDistribuido && b.piezasEntregadas === 0) {
+            b.piezasVendidas -= totalDistribuido;
+            b.piezasEntregadas = (b.piezasEntregadas || 0) + totalDistribuido;
+            b.dineroRecuperado = parseFloat((b.piezasVendidas * b.candyId?.precioUnitario || 0).toFixed(2));
+            b.recuperada = b.dineroRecuperado >= b.costoTotal;
+            await b.save();
+            corregidas++;
+            break;
+          }
+        }
+      }
+
+      console.log(`✅ Migración ejecutada (${corregidas} corregidas)`);
+    } catch (e) {
+      console.log('⚠️ Migración omitida:', e.message);
+    }
+  }, 500);
+});

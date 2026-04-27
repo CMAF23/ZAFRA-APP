@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>🍬 Zafra | Mis Ventas</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --pink:   #FF4F81;
+      --orange: #FF7849;
+      --yellow: #F9C846;
+      --green:  #10B981;
+      --blue:   #3B82F6;
+      --purple: #8B5CF6;
+      --red:    #EF4444;
+      --gray:   #6B7280;
+      --dark:   #1F2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { font-family: 'Nunito', sans-serif; background: #F9FAFB; min-height: 100vh; padding-bottom: 85px; }
+
+    /* HEADER */
+    header {
+      background: linear-gradient(135deg, #FF4F81 0%, #FF7849 100%);
+      padding: 16px 20px 20px; position: sticky; top: 0; z-index: 100;
+    }
+    .header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    header h1 { color: #fff; font-size: 1.25rem; font-family: 'Fredoka One', cursive; }
+    .clock-badge { background: rgba(255,255,255,0.25); color: #fff; padding: 5px 12px; border-radius: 20px; font-size: .8rem; font-weight: 700; }
+    .pills { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+    .pills::-webkit-scrollbar { display: none; }
+    .pill { flex-shrink: 0; padding: 8px 16px; border: 2px solid rgba(255,255,255,0.4); border-radius: 20px; background: transparent; color: rgba(255,255,255,0.85); font-family: 'Nunito', sans-serif; font-weight: 700; font-size: .82rem; cursor: pointer; transition: all .2s; }
+    .pill.active { background: #fff; color: var(--pink); border-color: #fff; }
+
+    /* MAIN */
+    main { padding: 16px; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* STAT CARDS */
+    .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .stat-card { background: #fff; border-radius: 16px; padding: 14px 12px; box-shadow: 0 1px 8px rgba(0,0,0,0.07); text-align: center; }
+    .stat-val { font-family: 'Fredoka One', cursive; font-size: 1.55rem; line-height: 1.1; margin-bottom: 3px; }
+    .stat-lbl { font-size: .68rem; color: var(--gray); font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
+
+    /* SECTION CARD */
+    .section-card { background: #fff; border-radius: 18px; padding: 16px; box-shadow: 0 1px 8px rgba(0,0,0,0.07); margin-bottom: 14px; }
+    .section-head { font-family: 'Fredoka One', cursive; font-size: 1rem; color: var(--dark); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+
+    /* SALE ROWS */
+    .sale-item { display: flex; align-items: center; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid #F3F4F6; }
+    .sale-item:last-child { border-bottom: none; }
+    .sale-meta { flex: 1; min-width: 0; }
+    .sale-name { font-weight: 800; font-size: .92rem; color: var(--dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sale-price { font-size: .73rem; color: var(--gray); margin-top: 2px; }
+    .sale-avail { font-size: .7rem; font-weight: 700; color: var(--blue); margin-top: 1px; }
+    .qty-wrap { display: flex; align-items: center; gap: 7px; flex-shrink: 0; margin-left: 10px; }
+    .q-btn { width: 34px; height: 34px; border-radius: 50%; border: none; font-size: 1.15rem; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform .1s; }
+    .q-btn:active { transform: scale(0.88); }
+    .q-btn.minus { background: #FEE2E2; color: var(--red); }
+    .q-btn.plus  { background: #D1FAE5; color: var(--green); }
+    .q-input { width: 42px; text-align: center; border: 2px solid #E5E7EB; border-radius: 9px; padding: 5px 2px; font-family: 'Nunito', sans-serif; font-weight: 800; font-size: .95rem; color: var(--dark); }
+    .q-input:focus { border-color: var(--pink); outline: none; }
+
+    /* TOTAL BAR */
+    .total-bar { background: linear-gradient(135deg, var(--pink), var(--orange)); border-radius: 14px; padding: 14px 16px; display: none; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .total-bar .label { color: rgba(255,255,255,.9); font-weight: 700; font-size: .9rem; }
+    .total-bar .amount { color: #fff; font-family: 'Fredoka One', cursive; font-size: 1.4rem; }
+
+    /* BTN SAVE */
+    .btn-save { width: 100%; padding: 15px; background: linear-gradient(135deg, var(--green), #34D399); color: #fff; border: none; border-radius: 14px; font-family: 'Fredoka One', cursive; font-size: 1.1rem; cursor: pointer; box-shadow: 0 4px 15px rgba(16,185,129,.35); transition: transform .15s, opacity .15s; }
+    .btn-save:active { transform: scale(0.97); }
+    .btn-save:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+    /* INVENTORY */
+    .inv-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #F3F4F6; }
+    .inv-item:last-child { border-bottom: none; }
+    .inv-name { font-weight: 800; font-size: .93rem; color: var(--dark); }
+    .inv-sub { font-size: .73rem; color: var(--gray); margin-top: 3px; }
+    .stock-badge { font-family: 'Fredoka One', cursive; font-size: 1.35rem; line-height: 1; text-align: center; min-width: 54px; }
+    .stock-badge .lbl { font-family: 'Nunito', sans-serif; font-size: .6rem; color: var(--gray); font-weight: 700; text-transform: uppercase; }
+    .ok   { color: var(--green); }
+    .low  { color: var(--orange); }
+    .zero { color: #D1D5DB; }
+
+    /* COMISION */
+    .commission-hero { background: linear-gradient(135deg, #8B5CF6, #6366F1); border-radius: 18px; padding: 20px; color: #fff; margin-bottom: 14px; text-align: center; }
+    .commission-hero .lbl { font-size: .8rem; opacity: .85; font-weight: 700; margin-bottom: 4px; }
+    .commission-hero .amount { font-family: 'Fredoka One', cursive; font-size: 2.5rem; line-height: 1; }
+    .commission-hero .sublbl { font-size: .75rem; opacity: .75; margin-top: 4px; }
+    .comm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .comm-item { background: rgba(255,255,255,.15); border-radius: 12px; padding: 12px; text-align: center; }
+    .comm-item .cv { font-family: 'Fredoka One', cursive; font-size: 1.2rem; }
+    .comm-item .cl { font-size: .68rem; opacity: .8; font-weight: 700; text-transform: uppercase; }
+
+    /* HISTORIAL */
+    .venta-card { border: 1.5px solid #F3F4F6; border-radius: 14px; padding: 13px; margin-bottom: 10px; background: #FAFAFA; }
+    .venta-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .venta-time { font-size: .78rem; color: var(--gray); font-weight: 700; }
+    .venta-tag { background: linear-gradient(135deg, var(--pink), var(--orange)); color: #fff; font-size: .68rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
+    .chip { background: #fff; border: 1px solid #E5E7EB; border-radius: 20px; padding: 3px 9px; font-size: .75rem; font-weight: 700; color: #374151; }
+    .venta-footer { background: #fff; border-radius: 9px; padding: 9px 11px; display: flex; justify-content: space-between; align-items: center; font-size: .8rem; }
+    .venta-footer .total { font-family: 'Fredoka One', cursive; font-size: 1rem; color: var(--orange); }
+    .venta-footer .comis { font-weight: 700; color: var(--green); font-size: .82rem; }
+    .btn-ticket { width: 100%; margin-top: 9px; padding: 8px; background: linear-gradient(135deg, var(--pink), var(--orange)); color: #fff; border: none; border-radius: 10px; font-weight: 700; font-size: .83rem; cursor: pointer; }
+
+    /* EMPTY */
+    .empty-state { text-align: center; padding: 32px 20px; color: var(--gray); }
+    .empty-state .em { font-size: 2.8rem; margin-bottom: 8px; }
+    .empty-state p { font-weight: 600; font-size: .9rem; }
+
+    .loading { text-align: center; padding: 28px; color: var(--gray); font-weight: 700; }
+
+    /* TICKET MODAL */
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 200; align-items: flex-end; justify-content: center; }
+    .overlay.show { display: flex; }
+    .modal-sheet { background: #fff; border-radius: 24px 24px 0 0; padding: 20px 20px 36px; width: 100%; max-height: 92vh; overflow-y: auto; animation: slideUp .25s ease; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .sheet-handle { width: 40px; height: 4px; background: #D1D5DB; border-radius: 2px; margin: 0 auto 16px; }
+    .modal-title { font-family: 'Fredoka One', cursive; font-size: 1.2rem; text-align: center; color: var(--pink); margin-bottom: 14px; }
+    .ticket-paper { font-family: 'Courier New', monospace; font-size: .8rem; background: #FFFBF0; border: 2px dashed #F9C846; border-radius: 12px; padding: 16px; white-space: pre-wrap; line-height: 1.65; margin-bottom: 14px; }
+    .btn-share { width: 100%; padding: 13px; margin-bottom: 8px; background: linear-gradient(135deg, var(--pink), var(--orange)); color: #fff; border: none; border-radius: 13px; font-family: 'Nunito', sans-serif; font-weight: 800; font-size: .95rem; cursor: pointer; }
+    .btn-close-sheet { width: 100%; padding: 12px; background: #F3F4F6; color: var(--dark); border: none; border-radius: 12px; font-family: 'Nunito', sans-serif; font-weight: 700; font-size: .9rem; cursor: pointer; }
+
+    /* TOAST */
+    #toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(16px); background: var(--dark); color: #fff; padding: 11px 20px; border-radius: 30px; font-weight: 700; font-size: .88rem; opacity: 0; transition: all .3s; z-index: 400; white-space: nowrap; pointer-events: none; }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.ok  { background: var(--green); }
+    #toast.err { background: var(--red); }
+
+    @media print {
+      body > *:not(.overlay) { display: none !important; }
+      .overlay { display: flex !important; position: static; background: none; padding: 0; }
+      .modal-sheet { border-radius: 0; max-height: none; padding: 0; }
+      .btn-share, .btn-close-sheet, .sheet-handle { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <h1>🍬 Zafra | Mis Ventas</h1>
+    <span class="clock-badge" id="clock">--:--</span>
+  </div>
+  <div class="pills">
+    <button class="pill active" onclick="switchTab('vender',this)">💰 Vender</button>
+    <button class="pill" onclick="switchTab('inventario',this)">📦 Mi Stock</button>
+    <button class="pill" onclick="switchTab('comision',this)">💜 Mi Comisión</button>
+    <button class="pill" onclick="switchTab('historial',this)">🧾 Historial</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- TAB VENDER -->
+  <div id="pane-vender" class="tab-pane active">
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-val" id="kpi-total" style="color:var(--orange)">$0.00</div>
+        <div class="stat-lbl">Total hoy</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" id="kpi-count" style="color:var(--purple)">0</div>
+        <div class="stat-lbl">Registros</div>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-head">🛍️ Registrar venta</div>
+      <div id="sale-rows"><div class="loading">Cargando dulces…</div></div>
+    </div>
+    <div class="total-bar" id="total-bar">
+      <span class="label">💰 Total a cobrar</span>
+      <span class="amount" id="bar-amount">$0.00</span>
+    </div>
+    <button class="btn-save" id="btn-save" onclick="saveVenta()" disabled>
+      ✅ Registrar Venta
+    </button>
+  </div>
+
+  <!-- TAB INVENTARIO -->
+  <div id="pane-inventario" class="tab-pane">
+    <div class="section-card">
+      <div class="section-head">📦 Mi inventario disponible</div>
+      <div id="inv-rows"><div class="loading">Cargando…</div></div>
+    </div>
+  </div>
+
+  <!-- TAB COMISION -->
+  <div id="pane-comision" class="tab-pane">
+    <div class="commission-hero">
+      <div class="lbl">💜 Mi comisión de esta semana</div>
+      <div class="amount" id="comm-week">$0.00</div>
+      <div class="sublbl" id="comm-dates">Cargando…</div>
+      <div class="comm-grid">
+        <div class="comm-item">
+          <div class="cv" id="comm-today">$0.00</div>
+          <div class="cl">Hoy</div>
+        </div>
+        <div class="comm-item">
+          <div class="cv" id="comm-days">0</div>
+          <div class="cl">Días</div>
+        </div>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-head">📊 Detalle semanal</div>
+      <div id="comm-detail"><div class="loading">Cargando…</div></div>
+    </div>
+  </div>
+
+  <!-- TAB HISTORIAL -->
+  <div id="pane-historial" class="tab-pane">
+    <div id="hist-content"><div class="loading">Cargando…</div></div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<!-- TICKET SHEET -->
+<div class="overlay" id="overlay" onclick="overlayClick(event)">
+  <div class="modal-sheet">
+    <div class="sheet-handle"></div>
+    <div class="modal-title">🧾 Tu Ticket</div>
+    <div class="ticket-paper" id="ticket-body"></div>
+    <button class="btn-share" onclick="shareTicket()">📤 Compartir Ticket</button>
+    <button class="btn-close-sheet" onclick="closeOverlay()">Cerrar</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const mxn = n => '$' + (+n).toFixed(2);
+const fmt = d => new Date(d).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+const fmtDate = d => new Date(d).toLocaleDateString('es-MX',{day:'2-digit',month:'short'});
+const API_BASE = (localStorage.getItem('zafraApiBase') || localStorage.getItem('dulceriaApiBase') || '').replace(/\/$/, '');
+
+function getCompaneraKey() {
+  const saved = localStorage.getItem('companeraApiKey');
+  if (saved) return saved;
+  const key = prompt('Ingresa tu clave de acceso:') || '';
+  if (key) localStorage.setItem('companeraApiKey', key.trim());
+  return key.trim();
+}
+
+// Clock
+setInterval(()=>{
+  $('clock').textContent = new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+},1000);
+
+function toast(msg,type='ok'){
+  const el=$('toast');
+  el.textContent=msg; el.className=`show ${type}`;
+  clearTimeout(el._t); el._t=setTimeout(()=>el.className='',2600);
+}
+
+async function api(path,opts={}){
+  const companeraKey = getCompaneraKey();
+  const endpoint = `${API_BASE}/api${path}`;
+  const res=await fetch(endpoint,{
+    headers:{
+      'Content-Type':'application/json',
+      ...(companeraKey ? {'x-companera-key': companeraKey} : {}),
+    },
+    ...opts,
+    body:opts.body?JSON.stringify(opts.body):undefined,
+  });
+  const data=await res.json();
+  if(!res.ok){
+    if (res.status === 401) {
+      localStorage.removeItem('companeraApiKey');
+      throw new Error('Clave inválida. Recarga la página e intenta otra vez.');
+    }
+    throw new Error(data.error||'Error en servidor');
+  }
+  return data;
+}
+
+let inventario=[], cantidades={}, currentVenta=null;
+
+function switchTab(tab,btn){
+  document.querySelectorAll('.tab-pane').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.pill').forEach(e=>e.classList.remove('active'));
+  $(`pane-${tab}`).classList.add('active');
+  btn.classList.add('active');
+  if(tab==='vender') loadVender();
+  if(tab==='inventario') loadInventario();
+  if(tab==='comision') loadComision();
+  if(tab==='historial') loadHistorial();
+}
+
+// ── VENDER ──
+async function loadVender(){
+  try{
+    inventario=await api('/companera/inventario');
+    cantidades={};
+    renderRows();
+    loadKPIs();
+  }catch(e){
+    $('sale-rows').innerHTML=`<div class="empty-state"><div class="em">😕</div><p>${e.message}</p></div>`;
+  }
+}
+
+function renderRows(){
+  const avail=inventario.filter(c=>c.disponibles>0);
+  if(!avail.length){
+    $('sale-rows').innerHTML=`<div class="empty-state"><div class="em">📦</div><p>Sin stock disponible.<br/>Pide que te entreguen más.</p></div>`;
+    return;
+  }
+  $('sale-rows').innerHTML=avail.map(c=>`
+    <div class="sale-item">
+      <div class="sale-meta">
+        <div class="sale-name">${c.nombre}</div>
+        <div class="sale-price">${mxn(c.precioUnitario)} c/u</div>
+        <div class="sale-avail">Tienes: ${c.disponibles} pzs</div>
+      </div>
+      <div class="qty-wrap">
+        <button class="q-btn minus" onclick="chQty('${c._id}',-1)">−</button>
+        <input class="q-input" type="number" min="0" max="${c.disponibles}"
+          id="q-${c._id}" value="0"
+          onchange="setQty('${c._id}',this.value,${c.disponibles})"/>
+        <button class="q-btn plus" onclick="chQty('${c._id}',1,${c.disponibles})">+</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function chQty(id,delta,max=999){
+  const cur=cantidades[id]||0;
+  const next=Math.max(0,Math.min(max,cur+delta));
+  cantidades[id]=next;
+  const el=$('q-'+id);
+  if(el) el.value=next;
+  updateBar();
+}
+
+function setQty(id,val,max){
+  const n=Math.max(0,Math.min(max,parseInt(val)||0));
+  cantidades[id]=n;
+  const el=$('q-'+id);
+  if(el) el.value=n;
+  updateBar();
+}
+
+function updateBar(){
+  let total=0;
+  for(const c of inventario) total+=(cantidades[c._id]||0)*c.precioUnitario;
+  const bar=$('total-bar'), btn=$('btn-save');
+  if(total>0){
+    $('bar-amount').textContent=mxn(total);
+    bar.style.display='flex';
+    btn.disabled=false;
+  }else{
+    bar.style.display='none';
+    btn.disabled=true;
+  }
+}
+
+async function saveVenta(){
+  const detalles=inventario
+    .filter(c=>(cantidades[c._id]||0)>0)
+    .map(c=>({candyId:c._id,cantidadVendida:cantidades[c._id]}));
+  if(!detalles.length) return;
+  const btn=$('btn-save');
+  btn.disabled=true; btn.textContent='⏳ Guardando…';
+  try{
+    const venta=await api('/companera/venta',{method:'POST',body:{detalles,totalRecibido:0}});
+    currentVenta=venta;
+    toast('✅ ¡Venta registrada!','ok');
+    showTicket(venta);
+    cantidades={};
+    await loadVender();
+  }catch(e){
+    toast('❌ '+e.message,'err');
+    btn.disabled=false;
+    btn.textContent='✅ Registrar Venta';
+  }
+}
+
+async function loadKPIs(){
+  try{
+    const data=await api('/companera/ventas/hoy');
+    $('kpi-total').textContent=mxn(data.totales.esperado);
+    $('kpi-count').textContent=data.ventas.length;
+  }catch{}
+}
+
+// ── INVENTARIO ──
+async function loadInventario(){
+  try{
+    const inv=await api('/companera/inventario');
+    const el=$('inv-rows');
+    if(!inv.length){
+      el.innerHTML=`<div class="empty-state"><div class="em">📦</div><p>Aún no tienes dulces asignados.</p></div>`;
+      return;
+    }
+    el.innerHTML=inv.map(c=>{
+      const cls=c.disponibles===0?'zero':c.disponibles<=5?'low':'ok';
+      return `<div class="inv-item">
+        <div>
+          <div class="inv-name">${c.nombre}</div>
+          <div class="inv-sub">${mxn(c.precioUnitario)} c/u &nbsp;·&nbsp; Entregadas: ${c.totalEntregadas} &nbsp;·&nbsp; Vendidas: ${c.vendidas}</div>
+        </div>
+        <div class="stock-badge">
+          <div class="${cls}">${c.disponibles}</div>
+          <div class="lbl">disp.</div>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    $('inv-rows').innerHTML=`<div class="empty-state"><div class="em">😕</div><p>${e.message}</p></div>`;
+  }
+}
+
+// ── COMISION ──
+async function loadComision(){
+  try{
+    const data=await api('/companera/comision');
+    $('comm-week').textContent=mxn(data.semana.totalComision);
+    $('comm-today').textContent=mxn(data.hoy.comision);
+    $('comm-days').textContent=data.semana.numeroDias;
+    $('comm-dates').textContent=`Semana ${fmtDate(data.semana.inicio)} – ${fmtDate(data.semana.fin)}`;
+    $('comm-detail').innerHTML=`
+      <div class="inv-item">
+        <div><div class="inv-name">Ventas totales semana</div></div>
+        <b style="font-family:'Fredoka One',cursive;font-size:1.1rem;color:var(--orange)">${mxn(data.semana.totalVentas)}</b>
+      </div>
+      <div class="inv-item">
+        <div><div class="inv-name">Tu comisión acumulada (12%)</div></div>
+        <b style="font-family:'Fredoka One',cursive;font-size:1.1rem;color:var(--green)">${mxn(data.semana.totalComision)}</b>
+      </div>
+      <div class="inv-item">
+        <div><div class="inv-name">Días trabajados</div></div>
+        <b style="font-family:'Fredoka One',cursive;font-size:1.1rem;color:var(--blue)">${data.semana.numeroDias}</b>
+      </div>
+      <div class="inv-item">
+        <div><div class="inv-name">Comisión solo hoy</div></div>
+        <b style="font-family:'Fredoka One',cursive;font-size:1.1rem;color:var(--purple)">${mxn(data.hoy.comision)}</b>
+      </div>`;
+  }catch(e){
+    $('comm-detail').innerHTML=`<div class="empty-state"><div class="em">😕</div><p>${e.message}</p></div>`;
+  }
+}
+
+// ── HISTORIAL ──
+async function loadHistorial(){
+  try{
+    const data=await api('/companera/ventas/hoy');
+    const el=$('hist-content');
+    if(!data.ventas.length){
+      el.innerHTML=`<div class="section-card"><div class="empty-state"><div class="em">📋</div><p>Sin ventas hoy todavía.</p></div></div>`;
+      return;
+    }
+    const tot=data.totales;
+    el.innerHTML=`
+      <div class="stats-row" style="margin-bottom:12px">
+        <div class="stat-card">
+          <div class="stat-val" style="color:var(--orange)">${mxn(tot.esperado)}</div>
+          <div class="stat-lbl">Total vendido</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" style="color:var(--green)">${mxn(tot.comision)}</div>
+          <div class="stat-lbl">Mi comisión</div>
+        </div>
+      </div>
+      ${data.ventas.map(v=>`
+        <div class="venta-card">
+          <div class="venta-top">
+            <span class="venta-time">⏰ ${fmt(v.fecha)}</span>
+            <span class="venta-tag">Venta #${v._id.slice(-4)}</span>
+          </div>
+          <div class="chips">
+            ${v.detalles.filter(d=>d.cantidadVendida>0).map(d=>
+              `<span class="chip">${d.nombreDulce}: ${d.cantidadVendida}</span>`
+            ).join('')}
+          </div>
+          <div class="venta-footer">
+            <span class="total">${mxn(v.totalEsperado)}</span>
+            <span class="comis">+${mxn(v.comisionCalculada)} comisión</span>
+          </div>
+          <button class="btn-ticket" onclick="showTicketData('${v._id}')">🧾 Ver Ticket</button>
+        </div>`).join('')}`;
+
+    // Guardar ventas para acceso rápido
+    window._ventasHoy = data.ventas;
+  }catch(e){
+    $('hist-content').innerHTML=`<div class="section-card"><div class="empty-state"><div class="em">😕</div><p>${e.message}</p></div></div>`;
+  }
+}
+
+function showTicketData(id){
+  const v=(window._ventasHoy||[]).find(x=>x._id===id);
+  if(v) showTicket(v);
+}
+
+// ── TICKET ──
+function showTicket(venta){
+  currentVenta=venta;
+  const fecha=new Date(venta.fecha).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'});
+  const lineas=venta.detalles
+    .filter(d=>d.cantidadVendida>0)
+    .map(d=>{
+      const nom=d.nombreDulce.substring(0,15).padEnd(15);
+      const cant=`x${d.cantidadVendida}`.padEnd(4);
+      const tot=mxn(d.subtotal).padStart(8);
+      return `  ${nom} ${cant} ${tot}`;
+    }).join('\n');
+
+  $('ticket-body').textContent=
+`━━━━━━━━━━━━━━━━━━━━━━━
+     🍬 MIS VENTAS 🍬
+━━━━━━━━━━━━━━━━━━━━━━━
+Fecha: ${fecha}
+─────────────────────────
+DULCE          CANT   TOTAL
+─────────────────────────
+${lineas}
+─────────────────────────
+TOTAL VENTA: ${mxn(venta.totalEsperado).padStart(10)}
+MI COMISIÓN:+${mxn(venta.comisionCalculada).padStart(10)}
+━━━━━━━━━━━━━━━━━━━━━━━
+  ¡Gracias por vender! 🎉
+━━━━━━━━━━━━━━━━━━━━━━━`;
+  $('overlay').classList.add('show');
+}
+
+function overlayClick(e){
+  if(e.target===$('overlay')) closeOverlay();
+}
+function closeOverlay(){
+  $('overlay').classList.remove('show');
+}
+
+async function shareTicket(){
+  const text=$('ticket-body').textContent;
+  if(navigator.share){
+    try{ await navigator.share({title:'Mi Ticket de Venta',text}); return; }catch{}
+  }
+  try{
+    await navigator.clipboard.writeText(text);
+    toast('📋 Ticket copiado al portapapeles','ok');
+  }catch{ window.print(); }
+}
+
+// INIT
+loadVender();
+</script>
+</body>
+</html>
