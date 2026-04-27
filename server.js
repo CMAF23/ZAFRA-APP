@@ -960,7 +960,7 @@ app.post('/api/companera/venta', async (req, res) => {
       source: 'companera',
       detalles: detallesOk,
       totalEsperado,
-      totalRecibido: +totalRecibido,
+      totalRecibido: isNaN(+totalRecibido) ? 0 : +totalRecibido,
       diferencia,
       comisionCalculada,
       semanaId: semana._id,
