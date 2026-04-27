@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>🍬 Zafra | Panel</title>
+<title>🍬 DulceríaManager</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdn.tailwindcss.com"></script>
@@ -182,7 +182,7 @@
 <div id="app-header" class="sticky top-0 z-40">
   <div class="max-w-7xl mx-auto px-4 py-3">
     <div class="flex items-center justify-between mb-2">
-      <h1 class="fredoka text-white text-2xl tracking-wide drop-shadow">🍬 Zafra</h1>
+      <h1 class="fredoka text-white text-2xl tracking-wide drop-shadow">🍬 DulceríaManager</h1>
       <span id="clock" class="text-white/80 text-sm font-bold"></span>
     </div>
     <div class="flex gap-1 overflow-x-auto pb-1">
@@ -674,7 +674,6 @@ const S = {
 const $  = id => document.getElementById(id);
 const fmt = n  => Number(n || 0).toFixed(2);
 const money = n => '$' + fmt(n);
-const API_BASE = (localStorage.getItem('zafraApiBase') || localStorage.getItem('dulceriaApiBase') || '').replace(/\/$/, '');
 
 function toast(msg, type = 'ok') {
   const el = $('toast'); const inner = $('toast-inner');
@@ -698,7 +697,7 @@ function formatShort(d) {
 // ─── API HELPER ─────────────────────────────────────────────
 async function api(path, opts = {}) {
   try {
-    const res = await fetch(`${API_BASE}/api${path}`, {
+    const res = await fetch('/api' + path, {
       headers: { 'Content-Type': 'application/json' },
       method:  opts.method  || (opts.body ? 'POST' : 'GET'),
       body:    opts.body    ? JSON.stringify(opts.body) : undefined,
@@ -909,11 +908,8 @@ async function saveSale() {
 
   if (!detalles.length) { toast('Ingresa al menos 1 dulce vendido', 'err'); return; }
 
- const totalRecibido = parseFloat($('received-input').value);
-if ($('received-input').value === '' || isNaN(totalRecibido) || totalRecibido < 0) {
-  toast('Ingresa el dinero recibido', 'err'); return;
-}
-  if (isNaN(totalRecibido) || totalRecibido < 0) { toast('Ingresa el monto recibido (puede ser 0)', 'err'); return; }
+  const totalRecibido = parseFloat($('received-input').value);
+  if (isNaN(totalRecibido) || totalRecibido < 0) { toast('Ingresa el dinero recibido', 'err'); return; }
 
   try {
     const venta = await api('/ventas', {
@@ -1060,7 +1056,7 @@ function buildReceiptHTML({ titulo, fecha, itemRows, esperado, recibido, diffTxt
   return `
     <div id="receipt-printable" style="font-family:monospace;font-size:13px;max-width:320px;margin:auto">
       <div style="text-align:center;margin-bottom:8px">
-        <div style="font-size:20px">🍬 ZAFRA</div>
+        <div style="font-size:20px">🍬 DULCERÍA</div>
         <b>${titulo}</b>
         <div style="font-size:11px;color:#666">${fecha}</div>
       </div>
@@ -1552,7 +1548,7 @@ async function openWeeklyReceipt(semanaId) {
     $('receipt-content').innerHTML = `
       <div id="receipt-printable" style="font-family:monospace;font-size:13px;max-width:320px;margin:auto">
         <div style="text-align:center;margin-bottom:8px">
-          <div style="font-size:20px">🍬 ZAFRA</div>
+          <div style="font-size:20px">🍬 DULCERÍA</div>
           <b>Comprobante Semanal</b>
           <div style="font-size:11px;color:#666">${formatShort(semana.inicio)} — ${formatShort(semana.fin)}</div>
         </div>
@@ -1870,7 +1866,7 @@ function ticketCompanera(ventaId) {
       <div id="ticket-companera-printable" style="font-family:monospace;font-size:13px;max-width:300px;margin:auto">
         <div style="text-align:center;margin-bottom:8px">
           <div style="font-size:22px">🍬</div>
-          <div style="font-size:15px;font-weight:bold">ZAFRA - COMPROBANTE</div>
+          <div style="font-size:15px;font-weight:bold">DULCERÍA - COMPROBANTE</div>
           <div style="font-size:11px;color:#888">PARA: COMPAÑERA VENDEDORA</div>
           <div style="font-size:11px;color:#666">${formatDate(new Date())} · ${formatTime(venta.fecha)}</div>
         </div>
@@ -1932,7 +1928,7 @@ async function imprimirReciboDistribucion() {
       <div id="receipt-printable" style="font-family:monospace;font-size:13px;max-width:360px;margin:auto">
         <div style="text-align:center;margin-bottom:8px">
           <div style="font-size:22px">🍬</div>
-          <div style="font-size:15px;font-weight:bold">ZAFRA</div>
+          <div style="font-size:15px;font-weight:bold">DULCERÍA</div>
           <div style="font-weight:bold;font-size:13px">RECIBO DE DISTRIBUCIÓN</div>
           <div style="font-size:11px;color:#666">${formatDate(new Date())}</div>
         </div>
@@ -1999,7 +1995,7 @@ async function reciboSemanalCompanera() {
       <div id="ticket-companera-printable" style="font-family:monospace;font-size:13px;max-width:300px;margin:auto">
         <div style="text-align:center;margin-bottom:8px">
           <div style="font-size:22px">🍬</div>
-          <div style="font-size:15px;font-weight:bold">ZAFRA</div>
+          <div style="font-size:15px;font-weight:bold">DULCERÍA</div>
           <div style="font-weight:bold">COMPROBANTE SEMANAL</div>
           <div style="font-size:11px;font-weight:bold;color:#f0a000">PARA: COMPAÑERA VENDEDORA</div>
           <div style="font-size:11px;color:#666">${formatShort(semana.inicio)} — ${formatShort(semana.fin)}</div>

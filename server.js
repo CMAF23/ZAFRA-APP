@@ -960,7 +960,7 @@ app.post('/api/companera/venta', async (req, res) => {
       source: 'companera',
       detalles: detallesOk,
       totalEsperado,
-      totalRecibido: isNaN(+totalRecibido) ? 0 : +totalRecibido,
+      totalRecibido: +totalRecibido,
       diferencia,
       comisionCalculada,
       semanaId: semana._id,
@@ -1045,10 +1045,6 @@ app.get('/api/companera/comision', async (req, res) => {
 // ─────────────────────────────────────────────
 app.get('/vendedora', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'indexv.html'));
-});
-
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.get('*', (req, res) => {
