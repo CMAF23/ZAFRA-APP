@@ -154,11 +154,9 @@ const ventaSchema = new mongoose.Schema({
   source:             { type: String, enum: ['admin', 'companera'], default: 'admin' },
   detalles:           [detalleSchema],
   totalEsperado:      { type: Number, required: true },
-  totalRecibido:      { type: Number, default: 0 },
+  totalRecibido:      { type: Number, required: true },
   diferencia:         Number,   // recibido - esperado (+ = sobrante, - = faltante)
   comisionCalculada:  Number,   // totalEsperado * 0.12
-  confirmado:         { type: Boolean, default: false },
-  fechaConfirmacion:  Date,
   semanaId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Semana' },
   notas:              String,
 }, { timestamps: true });
@@ -468,9 +466,7 @@ app.post('/api/ventas', async (req, res) => {
 
     if (totalEsperado === 0) return res.status(400).json({ error: 'No hay dulces para registrar' });
 
-    const recibidoNum = Number(totalRecibido) || 0;
-    const confirmado = recibidoNum > 0;
-    const diferencia         = parseFloat((recibidoNum - totalEsperado).toFixed(2));
+    const diferencia         = parseFloat((totalRecibido - totalEsperado).toFixed(2));
     const comisionCalculada  = parseFloat((totalEsperado * 0.12).toFixed(2));
 
     const venta = await Venta.create({
@@ -478,11 +474,9 @@ app.post('/api/ventas', async (req, res) => {
       diaSemana: ahora.getDay(),
       detalles: detallesOk,
       totalEsperado,
-      totalRecibido: recibidoNum,
+      totalRecibido: +totalRecibido,
       diferencia,
       comisionCalculada,
-      confirmado,
-      fechaConfirmacion: confirmado ? ahora : undefined,
       semanaId: semana._id,
       notas,
     });
@@ -557,29 +551,6 @@ app.delete('/api/ventas/:id', async (req, res) => {
   } catch (e) {
     console.error('DELETE /api/ventas:', e);
     res.status(500).json({ error: e.message });
-  }
-});
-
-app.put('/api/ventas/:id/confirmar', async (req, res) => {
-  try {
-    const totalRecibido = Number(req.body.totalRecibido);
-    if (Number.isNaN(totalRecibido) || totalRecibido < 0) {
-      return res.status(400).json({ error: 'totalRecibido inválido' });
-    }
-
-    const venta = await Venta.findById(req.params.id);
-    if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
-
-    venta.totalRecibido = totalRecibido;
-    venta.diferencia = parseFloat((totalRecibido - venta.totalEsperado).toFixed(2));
-    venta.confirmado = true;
-    venta.fechaConfirmacion = new Date();
-    await venta.save();
-
-    res.json(venta);
-  } catch (e) {
-    console.error('PUT /api/ventas/:id/confirmar:', e);
-    res.status(400).json({ error: e.message });
   }
 });
 
@@ -729,14 +700,7 @@ app.get('/api/semanas/actual', async (req, res) => {
   try {
     const semana = await getOrCreateCurrentWeek();
     const ventas = await Venta.find({ semanaId: semana._id }).sort('fecha');
-    res.json({
-      semana: {
-        ...semana.toObject(),
-        inicio: semana.fechaInicio,
-        fin: semana.fechaFin,
-      },
-      ventas,
-    });
+    res.json({ semana, ventas });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -987,9 +951,7 @@ app.post('/api/companera/venta', async (req, res) => {
 
     if (totalEsperado === 0) return res.status(400).json({ error: 'No hay dulces para registrar' });
 
-    const recibidoNum = Number(totalRecibido) || 0;
-    const confirmado = recibidoNum > 0;
-    const diferencia        = parseFloat((recibidoNum - totalEsperado).toFixed(2));
+    const diferencia        = parseFloat((+totalRecibido - totalEsperado).toFixed(2));
     const comisionCalculada = parseFloat((totalEsperado * 0.12).toFixed(2));
 
     const venta = await Venta.create({
@@ -998,11 +960,9 @@ app.post('/api/companera/venta', async (req, res) => {
       source: 'companera',
       detalles: detallesOk,
       totalEsperado,
-      totalRecibido: recibidoNum,
+      totalRecibido: +totalRecibido,
       diferencia,
       comisionCalculada,
-      confirmado,
-      fechaConfirmacion: confirmado ? ahora : undefined,
       semanaId: semana._id,
       notas,
     });
