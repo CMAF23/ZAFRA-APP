@@ -81,6 +81,10 @@
   .sale-row input[type=number]::-webkit-inner-spin-button,
   .sale-row input[type=number]::-webkit-outer-spin-button { opacity: 1; }
 
+  .venta-pay { display:inline-flex; align-items:center; gap:4px; font-size:.7rem; font-weight:800; padding:3px 9px; border-radius:999px; }
+  .venta-pay.cash { background:#D1FAE5; color:#065F46; }
+  .venta-pay.transfer { background:#DBEAFE; color:#1D4ED8; }
+
   /* Diff positive/negative */
   .diff-pos { color: var(--green); font-weight: 800; }
   .diff-neg { color: var(--red);   font-weight: 800; }
@@ -1005,7 +1009,12 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
   <div class="card mb-2" style="background:#F9FAFB; border-left:3px solid var(--orange)">
     <div class="flex justify-between items-start mb-2">
       <span class="text-sm font-bold text-gray-500">⏰ ${fechaTxt}</span>
-      <span class="badge-pending text-xs">Venta #${v._id.slice(-4)}</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        <span class="badge-pending text-xs">Venta #${v._id.slice(-4)}</span>
+        <span class="venta-pay ${(v.paymentMethod || 'efectivo') === 'transferencia' ? 'transfer' : 'cash'}">
+          Pago: ${(v.paymentMethod || 'efectivo') === 'transferencia' ? 'Transferencia' : 'Efectivo'}
+        </span>
+      </div>
     </div>
     <div class="flex flex-wrap gap-2 mb-3">
       ${v.detalles.filter(d=>d.cantidadVendida>0).map(d =>
@@ -1161,6 +1170,13 @@ function openReceiptModal() {
       ? `<span style="color:green">Sobra: +${money(tot.diferencia)}</span>`
       : `<span style="color:red">Falta: -${money(Math.abs(tot.diferencia))}</span>`;
 
+    const pagos = data.ventas.reduce((acc, v) => {
+      const key = (v.paymentMethod || 'efectivo') === 'transferencia' ? 'Transferencia' : 'Efectivo';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const pagosTxt = Object.entries(pagos).map(([k, count]) => `${k}: ${count}`).join(' · ');
+
     $('receipt-content').innerHTML = buildReceiptHTML({
       titulo: 'Recibo de Ventas Diario',
       fecha:  formatDate(new Date()),
@@ -1169,7 +1185,7 @@ function openReceiptModal() {
       recibido:  money(tot.recibido),
       diffTxt,
       comision:  money(tot.comision),
-      extra: '',
+      extra: pagosTxt ? `<div style="margin-top:8px;font-size:11px;color:#666"><b>Métodos de pago:</b> ${pagosTxt}</div>` : '',
     });
     $('modal-receipt').style.display = 'flex';
   }).catch(() => toast('No hay ventas del día todavía', 'err'));
@@ -1580,7 +1596,7 @@ function renderSemanaCard({ semana, ventas }) {
       <div>
         <h3 class="fredoka text-xl">Semana Actual</h3>
         <div class="text-sm text-gray-500 font-semibold">
-          ${formatShortUtc(inicioSemana)} → ${formatShortUtc(finSemana)} (Vie 18:00)
+          ${formatShortUtc(inicioSemana)} → ${formatShortUtc(finSemana)} (Vie 23:59)
         </div>
       </div>
       ${pagado

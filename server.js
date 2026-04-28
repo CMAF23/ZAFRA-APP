@@ -176,6 +176,7 @@ const ventaSchema = new mongoose.Schema({
   fecha:              { type: Date, default: Date.now },
   diaSemana:          Number,   // 0=Dom … 6=Sáb
   source:             { type: String, enum: ['admin', 'companera'], default: 'admin' },
+  paymentMethod:      { type: String, enum: ['efectivo', 'transferencia'], default: 'efectivo' },
   detalles:           [detalleSchema],
   totalEsperado:      { type: Number, required: true },
   totalRecibido:      { type: Number, required: true },
@@ -186,7 +187,7 @@ const ventaSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Venta = mongoose.model('Venta', ventaSchema);
 
-/** Semana de trabajo (Lun 00:00 → Vie 18:00) */
+/** Semana de trabajo (Lun 00:00 → Vie 23:59) */
 const semanaSchema = new mongoose.Schema({
   fechaInicio:   { type: Date, required: true },
   fechaFin:      { type: Date, required: true },
@@ -230,7 +231,7 @@ function getWeekBounds(date = new Date()) {
   monday.setHours(0, 0, 0, 0);
   const friday = new Date(monday);
   friday.setDate(friday.getDate() + 4);
-  friday.setHours(18, 0, 0, 0);
+  friday.setHours(23, 59, 59, 999);
   return { monday, friday };
 }
 
@@ -609,7 +610,7 @@ app.get('/api/ventas/hoy', async (req, res) => {
 
 app.post('/api/ventas', async (req, res) => {
   try {
-    const { detalles, totalRecibido, notas } = req.body;
+    const { detalles, totalRecibido, notas, paymentMethod = 'efectivo' } = req.body;
     if (!detalles?.length) return res.status(400).json({ error: 'Sin detalles de venta' });
 
     const semana = await getOrCreateCurrentWeek();
@@ -641,6 +642,7 @@ app.post('/api/ventas', async (req, res) => {
       fecha: ahora,
       diaSemana: ahora.getDay(),
       detalles: detallesOk,
+      paymentMethod,
       totalEsperado,
       totalRecibido: +totalRecibido,
       diferencia,
@@ -1112,7 +1114,7 @@ app.get('/api/companera/inventario', async (req, res) => {
  */
 app.post('/api/companera/venta', async (req, res) => {
   try {
-    const { detalles, totalRecibido = 0, notas } = req.body;
+    const { detalles, totalRecibido = 0, notas, paymentMethod = 'efectivo' } = req.body;
     if (!detalles?.length) return res.status(400).json({ error: 'Sin detalles de venta' });
 
     const semana = await getOrCreateCurrentWeek();
@@ -1144,6 +1146,7 @@ app.post('/api/companera/venta', async (req, res) => {
       fecha: ahora,
       diaSemana: ahora.getDay(),
       source: 'companera',
+      paymentMethod,
       detalles: detallesOk,
       totalEsperado,
       totalRecibido: +totalRecibido,

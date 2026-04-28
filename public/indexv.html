@@ -68,6 +68,17 @@
     .total-bar .label { color: rgba(255,255,255,.9); font-weight: 700; font-size: .9rem; }
     .total-bar .amount { color: #fff; font-family: 'Fredoka One', cursive; font-size: 1.4rem; }
 
+    .payment-choice { margin: 12px 0; }
+    .payment-choice .label { font-size: .72rem; font-weight: 800; color: var(--gray); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+    .payment-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .pay-btn { padding: 11px 12px; border-radius: 12px; border: 2px solid #E5E7EB; background: #fff; color: var(--dark); font-family: 'Nunito', sans-serif; font-weight: 800; font-size: .9rem; cursor: pointer; transition: all .15s; }
+    .pay-btn.active { border-color: var(--pink); background: #FFF1F5; color: var(--pink); box-shadow: 0 4px 12px rgba(255,79,129,.12); }
+    .transfer-box { margin-top: 10px; background: linear-gradient(135deg, #EFF6FF, #F8FBFF); border: 1.5px solid #BFDBFE; border-radius: 14px; padding: 14px; }
+    .transfer-title { font-family: 'Fredoka One', cursive; font-size: .95rem; color: #1D4ED8; margin-bottom: 8px; }
+    .transfer-grid { display: grid; gap: 8px; font-size: .82rem; color: var(--dark); }
+    .transfer-row { display: flex; justify-content: space-between; gap: 10px; }
+    .transfer-row span:first-child { color: var(--gray); font-weight: 700; }
+
     /* BTN SAVE */
     .btn-save { width: 100%; padding: 15px; background: linear-gradient(135deg, var(--green), #34D399); color: #fff; border: none; border-radius: 14px; font-family: 'Fredoka One', cursive; font-size: 1.1rem; cursor: pointer; box-shadow: 0 4px 15px rgba(16,185,129,.35); transition: transform .15s, opacity .15s; }
     .btn-save:active { transform: scale(0.97); }
@@ -96,9 +107,12 @@
 
     /* HISTORIAL */
     .venta-card { border: 1.5px solid #F3F4F6; border-radius: 14px; padding: 13px; margin-bottom: 10px; background: #FAFAFA; }
-    .venta-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .venta-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; }
     .venta-time { font-size: .78rem; color: var(--gray); font-weight: 700; }
     .venta-tag { background: linear-gradient(135deg, var(--pink), var(--orange)); color: #fff; font-size: .68rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+    .venta-pay { font-size: .68rem; font-weight: 800; padding: 3px 9px; border-radius: 20px; }
+    .venta-pay.cash { background: #D1FAE5; color: #065F46; }
+    .venta-pay.transfer { background: #DBEAFE; color: #1D4ED8; }
     .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
     .chip { background: #fff; border: 1px solid #E5E7EB; border-radius: 20px; padding: 3px 9px; font-size: .75rem; font-weight: 700; color: #374151; }
     .venta-footer { background: #fff; border-radius: 9px; padding: 9px 11px; display: flex; justify-content: space-between; align-items: center; font-size: .8rem; }
@@ -194,6 +208,26 @@
       <span class="label">💰 Total a cobrar</span>
       <span class="amount" id="bar-amount">$0.00</span>
     </div>
+
+    <div class="payment-choice">
+      <div class="label">Forma de pago</div>
+      <div class="payment-buttons">
+        <button type="button" class="pay-btn active" id="pay-efectivo" onclick="setPaymentMethod('efectivo')">💵 Efectivo</button>
+        <button type="button" class="pay-btn" id="pay-transferencia" onclick="setPaymentMethod('transferencia')">🏦 Transferencia</button>
+      </div>
+      <div id="transfer-box" class="transfer-box" style="display:none">
+        <div class="transfer-title">Datos para transferencia BBVA</div>
+        <div class="transfer-grid">
+          <div class="transfer-row"><span>Titular</span><b>Carlos Manuel Acevedo Flores</b></div>
+          <div class="transfer-row"><span>Banco</span><b>BBVA</b></div>
+          <div class="transfer-row"><span>Cuenta</span><b>155 295 4239</b></div>
+          <div class="transfer-row"><span>CLABE</span><b>012 180 01552954239 5</b></div>
+          <div class="transfer-row"><span>SWIFT</span><b>BCMRMXMMPYM</b></div>
+          <div class="transfer-row"><span>Celular vinculado</span><b>•9145</b></div>
+        </div>
+      </div>
+    </div>
+
     <button class="btn-save" id="btn-save" onclick="saveVenta()" disabled>
       ✅ Registrar Venta
     </button>
@@ -299,6 +333,7 @@ async function api(path,opts={}){
 }
 
 let inventario=[], cantidades={}, currentVenta=null;
+let paymentMethod = 'efectivo';
 
 function switchTab(tab,btn){
   document.querySelectorAll('.tab-pane').forEach(e=>e.classList.remove('active'));
@@ -317,10 +352,21 @@ async function loadVender(){
     inventario=await api('/companera/inventario');
     cantidades={};
     renderRows();
+    setPaymentMethod('efectivo');
     loadKPIs();
   }catch(e){
     $('sale-rows').innerHTML=`<div class="empty-state"><div class="em">😕</div><p>${e.message}</p></div>`;
   }
+}
+
+function setPaymentMethod(method){
+  paymentMethod = method === 'transferencia' ? 'transferencia' : 'efectivo';
+  const cashBtn = $('pay-efectivo');
+  const transferBtn = $('pay-transferencia');
+  if (cashBtn) cashBtn.classList.toggle('active', paymentMethod === 'efectivo');
+  if (transferBtn) transferBtn.classList.toggle('active', paymentMethod === 'transferencia');
+  const transferBox = $('transfer-box');
+  if (transferBox) transferBox.style.display = paymentMethod === 'transferencia' ? 'block' : 'none';
 }
 
 function renderRows(){
@@ -386,7 +432,7 @@ async function saveVenta(){
   const btn=$('btn-save');
   btn.disabled=true; btn.textContent='⏳ Guardando…';
   try{
-    const venta=await api('/companera/venta',{method:'POST',body:{detalles,totalRecibido:0}});
+    const venta=await api('/companera/venta',{method:'POST',body:{detalles,totalRecibido:0,paymentMethod}});
     currentVenta=venta;
     toast('✅ ¡Venta registrada!','ok');
     showTicket(venta);
@@ -489,7 +535,12 @@ async function loadHistorial(){
         <div class="venta-card">
           <div class="venta-top">
             <span class="venta-time">⏰ ${fmt(v.fecha)}</span>
-            <span class="venta-tag">Venta #${v._id.slice(-4)}</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+              <span class="venta-tag">Venta #${v._id.slice(-4)}</span>
+              <span class="venta-pay ${(v.paymentMethod || 'efectivo') === 'transferencia' ? 'transfer' : 'cash'}">
+                Pago: ${(v.paymentMethod || 'efectivo') === 'transferencia' ? 'Transferencia' : 'Efectivo'}
+              </span>
+            </div>
           </div>
           <div class="chips">
             ${v.detalles.filter(d=>d.cantidadVendida>0).map(d=>
@@ -519,6 +570,7 @@ function showTicketData(id){
 function showTicket(venta){
   currentVenta=venta;
   const fecha=new Date(venta.fecha).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'});
+  const metodoPago = (venta.paymentMethod || 'efectivo') === 'transferencia' ? 'Transferencia' : 'Efectivo';
   const lineas=venta.detalles
     .filter(d=>d.cantidadVendida>0)
     .map(d=>{
@@ -533,6 +585,7 @@ function showTicket(venta){
      🍬 MIS VENTAS 🍬
 ━━━━━━━━━━━━━━━━━━━━━━━
 Fecha: ${fecha}
+Pago: ${metodoPago}
 ─────────────────────────
 DULCE          CANT   TOTAL
 ─────────────────────────
