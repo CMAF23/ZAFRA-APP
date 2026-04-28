@@ -441,9 +441,6 @@ app.use('/api', (req, res, next) => {
 // ─────────────────────────────────────────────
 app.post('/api/seed', async (req, res) => {
   try {
-    const count = await Candy.countDocuments();
-    if (count > 0) return res.json({ ok: false, msg: 'Ya hay dulces registrados' });
-
     /*
      * Precios sugeridos calculados con margen ~50-130% sobre costo/pieza.
      * El usuario puede modificarlos en la sección "Catálogo".
@@ -459,9 +456,31 @@ app.post('/api/seed', async (req, res) => {
       { nombre: 'PicaGomas',          piezasPorBolsa: 100, costoPorBolsa: 65.5, precioUnitario: 1.5 },
       { nombre: 'Rica Sandía',        piezasPorBolsa: 40,  costoPorBolsa: 55,   precioUnitario: 3   },
       { nombre: 'Chipileta',          piezasPorBolsa: 30,  costoPorBolsa: 69.5, precioUnitario: 4   },
+      { nombre: 'papas fuego caseras',      piezasPorBolsa: 10, costoPorBolsa: 51,   precioUnitario: 9.5 },
+      { nombre: 'Kiubo Re mix',             piezasPorBolsa: 10, costoPorBolsa: 47,   precioUnitario: 8.5 },
+      { nombre: 'Pulparindos',              piezasPorBolsa: 20, costoPorBolsa: 43.5, precioUnitario: 4.5 },
+      { nombre: 'papas chidas Salsa negra', piezasPorBolsa: 5,  costoPorBolsa: 74,   precioUnitario: 27  },
     ];
-    await Candy.insertMany(dulces);
-    res.json({ ok: true, msg: `${dulces.length} dulces cargados`, dulces });
+
+    let insertados = 0;
+    for (const dulce of dulces) {
+      const result = await Candy.updateOne(
+        { nombre: dulce.nombre },
+        { $setOnInsert: dulce },
+        { upsert: true }
+      );
+      insertados += result.upsertedCount || 0;
+    }
+
+    res.json({
+      ok: true,
+      msg: insertados > 0
+        ? `${insertados} dulces agregados`
+        : 'No había dulces nuevos para agregar',
+      insertados,
+      total: dulces.length,
+      dulces,
+    });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
