@@ -56,6 +56,8 @@
   /* Recovery badge */
   .badge-recovered { background: #D1FAE5; color: #065F46; font-size:.75rem; font-weight:700; padding:2px 10px; border-radius:999px; }
   .badge-pending   { background: #FEF3C7; color: #92400E; font-size:.75rem; font-weight:700; padding:2px 10px; border-radius:999px; }
+  .badge-empty     { background: #FEE2E2; color: #991B1B; font-size:.75rem; font-weight:700; padding:2px 10px; border-radius:999px; }
+  .badge-low       { background: #FEF3C7; color: #92400E; font-size:.75rem; font-weight:700; padding:2px 10px; border-radius:999px; }
 
   /* Progress bar */
   .prog-wrap { background:#E5E7EB; border-radius:999px; height:10px; overflow:hidden; }
@@ -66,6 +68,8 @@
   /* Recovered row highlight */
   .row-recovered { background: linear-gradient(90deg, #D1FAE5 0%, #ECFDF5 100%) !important; }
   .row-recovered td { border-bottom: 1px solid #A7F3D0 !important; }
+  .row-empty { background: linear-gradient(90deg, #FEE2E2 0%, #FFF1F2 100%) !important; }
+  .row-empty td { border-bottom: 1px solid #FCA5A5 !important; }
 
   /* Sale row */
   .sale-row input[type=number] {
@@ -338,6 +342,16 @@
         <div class="empty-state"><div class="emoji">📋</div><p>No hay registros hoy</p></div>
       </div>
     </div>
+
+    <div class="card mt-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="fredoka text-lg">🗂️ Tickets pasados</h3>
+        <button class="btn btn-outline btn-sm" onclick="loadTodaySales()">🔄</button>
+      </div>
+      <div id="sales-archive">
+        <div class="empty-state"><div class="emoji">🗂️</div><p>Cargando tickets…</p></div>
+      </div>
+    </div>
   </div>
 
   <!-- ── INVENTARIO ──────────────────────────────────────────── -->
@@ -388,13 +402,13 @@
     <!-- Tabla de distribuciones -->
     <div class="card">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="fredoka text-lg">📋 Entregas del Día</h3>
+        <h3 class="fredoka text-lg">📋 Historial de entregas</h3>
         <button onclick="imprimirReciboDistribucion()" style="background:#7B2FBE;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
           📄 Recibo de Distribución
         </button>
       </div>
       <div id="distribucion-table" class="table-scroll">
-        <div class="empty-state"><div class="emoji">👩‍💼</div><p>Sin entregas registradas hoy</p></div>
+        <div class="empty-state"><div class="emoji">👩‍💼</div><p>Sin entregas registradas</p></div>
       </div>
     </div>
   </div>
@@ -638,7 +652,7 @@
 <div id="modal-ticket-companera" class="modal-overlay" style="display:none">
   <div class="modal-box" style="max-width:360px">
     <div class="flex items-center justify-between mb-4">
-      <h3 class="modal-title" style="color:#f0a000">🧾 Ticket Compañera</h3>
+      <h3 class="modal-title" style="color:#f0a000">🧾 Ticket de Venta</h3>
       <button onclick="closeModal('modal-ticket-companera')" class="text-gray-400 hover:text-gray-700 text-2xl">✕</button>
     </div>
     <div id="ticket-companera-content"></div>
@@ -668,12 +682,35 @@ const S = {
   dashboard: null,
   semana: null,
   ventaHoy: null,
+  ventas: [],
 };
 
 // ─── UTILS ──────────────────────────────────────────────────
 const $  = id => document.getElementById(id);
 const fmt = n  => Number(n || 0).toFixed(2);
 const money = n => '$' + fmt(n);
+
+function formatShortLocal(d) {
+  const dt = new Date(d);
+  return `${dt.getDate()}/${dt.getMonth()+1}/${dt.getFullYear()}`;
+}
+
+function formatShortUtc(d) {
+  const dt = new Date(d);
+  return `${dt.getUTCDate()}/${dt.getUTCMonth()+1}/${dt.getUTCFullYear()}`;
+}
+
+function localDateKey(d) {
+  const dt = new Date(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function isTodayLocal(d) {
+  return localDateKey(d) === localDateKey(new Date());
+}
 
 function toast(msg, type = 'ok') {
   const el = $('toast'); const inner = $('toast-inner');
@@ -930,56 +967,101 @@ function clearSaleForm() {
   calcTotals();
 }
 
+function renderVentaCard(v, { showDate = false, archive = false } = {}) {
+  const gananciaNeta = (v.totalEsperado - v.comisionCalculada).toFixed(2);
+  const fechaTxt = showDate ? `${formatShortLocal(v.fecha)} · ${formatTime(v.fecha)}` : formatTime(v.fecha);
+
+  return `
+  <div class="card mb-2" style="background:#F9FAFB; border-left:3px solid var(--orange)">
+    <div class="flex justify-between items-start mb-2">
+      <span class="text-sm font-bold text-gray-500">⏰ ${fechaTxt}</span>
+      <span class="badge-pending text-xs">Venta #${v._id.slice(-4)}</span>
+    </div>
+    <div class="flex flex-wrap gap-2 mb-3">
+      ${v.detalles.filter(d=>d.cantidadVendida>0).map(d =>
+        `<span class="text-xs bg-white border border-gray-200 rounded-full px-2 py-0.5 font-semibold">
+          ${d.nombreDulce}: ${d.cantidadVendida}</span>`).join('')}
+    </div>
+
+    <div style="background:linear-gradient(135deg,#FFF5F7,#FFFBFC);padding:8px;border-radius:8px;font-size:12px;font-weight:bold">
+      <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+        <span>💰 Total venta:</span><span style="color:var(--orange)">${money(v.totalEsperado)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:2px;color:#E63946">
+        <span>👩 Comisión compañera (12%):</span><span>-${money(v.comisionCalculada)}</span>
+      </div>
+      <hr style="border:none;border-top:1px dashed #ddd;margin:4px 0;opacity:0.5"/>
+      <div style="display:flex;justify-content:space-between;color:var(--green)">
+        <span>✅ Tu ganancia neta:</span><span>$${gananciaNeta}</span>
+      </div>
+    </div>
+
+    <div class="flex gap-4 mt-2 text-xs font-bold">
+      <span>Recibido: <span class="text-purple-600">${money(v.totalRecibido)}</span></span>
+      <span class="${v.diferencia>=0?'text-green-600':'text-red-500'}">
+        Dif: ${v.diferencia>=0?'+':''}${money(v.diferencia)}</span>
+    </div>
+    ${v.notas ? `<div class="text-xs text-gray-400 mt-1">📝 ${v.notas}</div>` : ''}
+    <div class="mt-3" style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="ticketCompanera('${v._id}')" style="background:#f0a000;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
+        🧾 Ticket
+      </button>
+      <button onclick="deleteVenta('${v._id}')" style="background:#E63946;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
+        🗑️ Eliminar
+      </button>
+    </div>
+  </div>`;
+}
+
+function renderSalesArchive(ventas) {
+  const el = $('sales-archive');
+  const pasado = ventas.filter(v => !isTodayLocal(v.fecha));
+
+  if (!pasado.length) {
+    el.innerHTML = `<div class="empty-state"><div class="emoji">🗂️</div><p>No hay tickets pasados todavía</p></div>`;
+    return;
+  }
+
+  const grupos = {};
+  pasado.forEach(v => {
+    const key = localDateKey(v.fecha);
+    if (!grupos[key]) grupos[key] = [];
+    grupos[key].push(v);
+  });
+
+  const sections = Object.entries(grupos)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([key, items]) => {
+      const fechaGrupo = formatShortLocal(items[0].fecha);
+      return `
+        <div class="mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-bold text-gray-600">📅 ${fechaGrupo}</div>
+            <div class="text-xs text-gray-400 font-bold">${items.length} ticket${items.length !== 1 ? 's' : ''}</div>
+          </div>
+          <div class="space-y-2">
+            ${items.map(v => renderVentaCard(v, { showDate: true, archive: true })).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+  el.innerHTML = sections;
+}
+
 async function loadTodaySales() {
   try {
-    const data = await api('/ventas/hoy');
+    const [data, archive] = await Promise.all([
+      api('/ventas/hoy'),
+      api('/ventas?limite=250'),
+    ]);
+    S.ventas = archive;
     const el   = $('today-history');
     if (!data.ventas.length) {
       el.innerHTML = `<div class="empty-state"><div class="emoji">📋</div><p>Sin registros hoy todavía</p></div>`;
+      renderSalesArchive(archive);
       return;
     }
-    const rows = data.ventas.map(v => {
-      const gananciaNeta = (v.totalEsperado - v.comisionCalculada).toFixed(2);
-      return `
-      <div class="card mb-2" style="background:#F9FAFB; border-left:3px solid var(--orange)">
-        <div class="flex justify-between items-start mb-2">
-          <span class="text-sm font-bold text-gray-500">⏰ ${formatTime(v.fecha)}</span>
-          <span class="badge-pending text-xs">Venta #${v._id.slice(-4)}</span>
-        </div>
-        <div class="flex flex-wrap gap-2 mb-3">
-          ${v.detalles.filter(d=>d.cantidadVendida>0).map(d =>
-            `<span class="text-xs bg-white border border-gray-200 rounded-full px-2 py-0.5 font-semibold">
-              ${d.nombreDulce}: ${d.cantidadVendida}</span>`).join('')}
-        </div>
-        
-        <div style="background:linear-gradient(135deg,#FFF5F7,#FFFBFC);padding:8px;border-radius:8px;font-size:12px;font-weight:bold">
-          <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-            <span>💰 Total venta:</span><span style="color:var(--orange)">${money(v.totalEsperado)}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:2px;color:#E63946">
-            <span>👩 Comisión compañera (12%):</span><span>-${money(v.comisionCalculada)}</span>
-          </div>
-          <hr style="border:none;border-top:1px dashed #ddd;margin:4px 0;opacity:0.5"/>
-          <div style="display:flex;justify-content:space-between;color:var(--green)">
-            <span>✅ Tu ganancia neta:</span><span>$${gananciaNeta}</span>
-          </div>
-        </div>
-        
-        <div class="flex gap-4 mt-2 text-xs font-bold">
-          <span>Recibido: <span class="text-purple-600">${money(v.totalRecibido)}</span></span>
-          <span class="${v.diferencia>=0?'text-green-600':'text-red-500'}">
-            Dif: ${v.diferencia>=0?'+':''}${money(v.diferencia)}</span>
-        </div>
-        ${v.notas ? `<div class="text-xs text-gray-400 mt-1">📝 ${v.notas}</div>` : ''}
-        <div class="mt-3" style="display:flex;gap:8px;flex-wrap:wrap">
-          <button onclick="ticketCompanera('${v._id}')" style="background:#f0a000;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
-            🧾 Ticket Compañera
-          </button>
-          <button onclick="deleteVenta('${v._id}')" style="background:#E63946;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
-            🗑️ Eliminar
-          </button>
-        </div>
-      </div>`}).join('');
+    const rows = data.ventas.map(v => renderVentaCard(v)).join('');
 
     const tot = data.totales;
     const gananciaTotalNeta = (tot.esperado - tot.comision).toFixed(2);
@@ -997,6 +1079,7 @@ async function loadTodaySales() {
             <div class="font-bold text-purple-600">${data.ventas.length}</div></div>
         </div>
       </div>`;
+      renderSalesArchive(archive);
   } catch {}
 }
 
@@ -1136,8 +1219,9 @@ function renderInventario(bolsas) {
     const piezasEntregadas = b.piezasEntregadas || 0;
     const piezasDisponibles = b.piezasTotales - pezasVendidas - piezasEntregadas;
     const pctVendidas = Math.min(100, b.piezasTotales > 0 ? (pezasVendidas / b.piezasTotales * 100) : 0);
+    const agotada = piezasDisponibles <= 0;
     return `
-    <tr class="${b.recuperada ? 'row-recovered' : ''}">
+    <tr class="${b.recuperada ? 'row-recovered' : ''} ${agotada ? 'row-empty' : ''}">
       <td>
         <div class="font-bold">${candy?.nombre || '—'}</div>
         <div class="text-xs text-gray-400">${formatShort(b.fechaCompra)} · ${b.cantidadBolsas} bolsa${b.cantidadBolsas>1?'s':''}</div>
@@ -1153,8 +1237,9 @@ function renderInventario(bolsas) {
         <div class="text-xs text-gray-400">Entregadas</div>
       </td>
       <td>
-        <div class="text-sm font-bold text-purple-600">${piezasDisponibles}</div>
+        <div class="text-sm font-bold ${agotada ? 'text-red-600' : 'text-purple-600'}">${piezasDisponibles}</div>
         <div class="text-xs text-gray-400">Disponibles</div>
+        ${agotada ? '<div class="badge-empty mt-1 inline-block">Agotado</div>' : ''}
       </td>
       <td>
         <div class="prog-wrap mb-1" style="width:120px">
@@ -1443,13 +1528,15 @@ async function loadSemana() {
 function renderSemanaCard({ semana, ventas }) {
   const el = $('semana-card');
   const pagado = semana.pagado;
+  const inicioSemana = semana.fechaInicio || semana.inicio;
+  const finSemana = semana.fechaFin || semana.fin;
 
   el.innerHTML = `
     <div class="flex items-start justify-between mb-4">
       <div>
         <h3 class="fredoka text-xl">Semana Actual</h3>
         <div class="text-sm text-gray-500 font-semibold">
-          ${formatShort(semana.inicio)} → ${formatShort(semana.fin)} (Vie 18:00)
+          ${formatShortUtc(inicioSemana)} → ${formatShortUtc(finSemana)} (Vie 18:00)
         </div>
       </div>
       ${pagado
@@ -1491,7 +1578,7 @@ function renderSemanaCard({ semana, ventas }) {
 
   const diasMap = {};
   ventas.forEach(v => {
-    const k = v.fecha.slice(0, 10);
+    const k = localDateKey(v.fecha);
     if (!diasMap[k]) diasMap[k] = { esperado:0, recibido:0, comision:0, registros:0, fecha:v.fecha };
     diasMap[k].esperado  += v.totalEsperado;
     diasMap[k].recibido  += v.totalRecibido;
@@ -1506,7 +1593,7 @@ function renderSemanaCard({ semana, ventas }) {
     return `
     <div class="day-row">
       <div>
-        <div class="font-bold">${dia} ${formatShort(k)}</div>
+        <div class="font-bold">${dia} ${formatShortLocal(d.fecha)}</div>
         <div class="text-xs text-gray-400">${d.registros} registro${d.registros>1?'s':''}</div>
       </div>
       <div class="text-right">
@@ -1527,9 +1614,11 @@ async function closeSemana(id) {
 async function openWeeklyReceipt(semanaId) {
   try {
     const { semana, ventas } = await api('/semanas/actual');
+    const inicioSemana = semana.fechaInicio || semana.inicio;
+    const finSemana = semana.fechaFin || semana.fin;
     const diasMap = {};
     ventas.forEach(v => {
-      const k = v.fecha.slice(0,10);
+      const k = localDateKey(v.fecha);
       if (!diasMap[k]) diasMap[k] = { esperado:0, comision:0, fecha:v.fecha };
       diasMap[k].esperado  += v.totalEsperado;
       diasMap[k].comision  += v.comisionCalculada;
@@ -1539,7 +1628,7 @@ async function openWeeklyReceipt(semanaId) {
     const itemRows = Object.entries(diasMap).map(([k,d]) => {
       const dt = new Date(d.fecha);
       return `<tr>
-        <td>${dias[dt.getDay()]} ${formatShort(k)}</td>
+        <td>${dias[dt.getDay()]} ${formatShortLocal(d.fecha)}</td>
         <td style="text-align:right">${money(d.esperado)}</td>
         <td style="text-align:right">${money(d.comision)}</td>
       </tr>`;
@@ -1550,7 +1639,7 @@ async function openWeeklyReceipt(semanaId) {
         <div style="text-align:center;margin-bottom:8px">
           <div style="font-size:20px">🍬 DULCERÍA</div>
           <b>Comprobante Semanal</b>
-          <div style="font-size:11px;color:#666">${formatShort(semana.inicio)} — ${formatShort(semana.fin)}</div>
+          <div style="font-size:11px;color:#666">${formatShortUtc(inicioSemana)} — ${formatShortUtc(finSemana)}</div>
         </div>
         <hr style="border:1px dashed #ccc;margin:8px 0"/>
         <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -1589,7 +1678,7 @@ function renderSemanasHistory(semanas) {
   el.innerHTML = semanas.map(s => `
     <div class="day-row">
       <div>
-        <div class="font-bold text-sm">${formatShort(s.fechaInicio)} → ${formatShort(s.fechaFin)}</div>
+        <div class="font-bold text-sm">${formatShortUtc(s.fechaInicio)} → ${formatShortUtc(s.fechaFin)}</div>
         <div class="text-xs text-gray-400">${s.numeroDias} días · ${money(s.totalVentas)}</div>
       </div>
       <div class="text-right">
@@ -1669,58 +1758,109 @@ async function loadRecomendaciones() {
 
 async function loadDistribuciones() {
   try {
-    const { distribuciones, totales } = await api('/distribuciones/hoy');
-    
-    $('dist-piezas-hoy').textContent = totales.cantidad;
-    $('dist-entregas-hoy').textContent = `${distribuciones.length} entrega${distribuciones.length !== 1 ? 's' : ''}`;
-    $('dist-subtotal-hoy').textContent = money(totales.subtotal);
-    $('dist-ganancia-hoy').textContent = money(totales.gananciasEsperada);
-    $('dist-devuelto-hoy').textContent = money(totales.montoDevuelto);
+    const [hoyData, distribuciones, bolsas] = await Promise.all([
+      api('/distribuciones/hoy'),
+      api('/distribuciones?limite=250'),
+      S.bolsas.length ? Promise.resolve(S.bolsas) : api('/bolsas'),
+    ]);
 
-    const tbody = distribuciones.map((d, i) => {
-      const porcentajeCalc = ((d.gananciasEsperada / d.subtotal) * 100).toFixed(0);
-      return `
-        <tr>
-          <td>${new Date(d.fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</td>
-          <td>
-            <div class="font-bold">${d.candyId?.nombre || '—'}</div>
-            <div class="text-xs text-gray-400">${d.cantidad} piezas</div>
-          </td>
-          <td class="font-bold text-orange-600">${money(d.subtotal)}</td>
-          <td>
-            <div class="font-bold text-purple-600">${money(d.gananciasEsperada)}</div>
-            <div class="text-xs text-purple-500">(${porcentajeCalc}%)</div>
-          </td>
-          <td>
-            <input type="number" class="w-20 px-2 py-1 border rounded text-sm" 
-              value="${d.montoDevuelto}" 
-              placeholder="$0" 
-              onchange="updateDistribucionPagado('${d._id}', this.value)"/>
-          </td>
-          <td>
-            <button class="text-red-500 hover:text-red-700 text-lg" onclick="deleteDistribucion('${d._id}')">🗑</button>
-          </td>
-        </tr>
-      `;
-    }).join('');
+    S.bolsas = bolsas;
 
-    const table = `
-      <table style="width:100%; border-collapse:collapse">
-        <thead style="background:#f0f0f0; font-weight:700; text-align:left">
-          <tr style="border-bottom:2px solid #ddd">
-            <th style="padding:10px">Hora</th>
-            <th style="padding:10px">Producto</th>
-            <th style="padding:10px; text-align:right">Costo</th>
-            <th style="padding:10px; text-align:right">Ganancia (12%)</th>
-            <th style="padding:10px">Dinero Devuelto</th>
-            <th style="padding:10px">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>${tbody || '<tr><td colspan="6" style="padding:20px; text-align:center; color:#999">Sin entregas hoy</td></tr>'}</tbody>
-      </table>
-    `;
-    
-    $('distribucion-table').innerHTML = table;
+    const stockPorCandy = bolsas.reduce((acc, b) => {
+      const candyId = b.candyId?._id ? b.candyId._id.toString() : b.candyId?.toString?.() || b.candyId;
+      acc[candyId] = acc[candyId] || { disponibles: 0, nombre: b.candyId?.nombre || '—' };
+      acc[candyId].disponibles += Math.max(0, (b.piezasTotales || 0) - (b.piezasVendidas || 0) - (b.piezasEntregadas || 0));
+      if (b.candyId?.nombre) acc[candyId].nombre = b.candyId.nombre;
+      return acc;
+    }, {});
+
+    $('dist-piezas-hoy').textContent = hoyData.totales.cantidad;
+    $('dist-entregas-hoy').textContent = `${hoyData.distribuciones.length} entrega${hoyData.distribuciones.length !== 1 ? 's' : ''}`;
+    $('dist-subtotal-hoy').textContent = money(hoyData.totales.subtotal);
+    $('dist-ganancia-hoy').textContent = money(hoyData.totales.gananciasEsperada);
+    $('dist-devuelto-hoy').textContent = money(hoyData.totales.montoDevuelto);
+
+    if (!distribuciones.length) {
+      $('distribucion-table').innerHTML = '<div class="empty-state"><div class="emoji">👩‍💼</div><p>Sin entregas registradas</p></div>';
+      return;
+    }
+
+    const grupos = {};
+    distribuciones.forEach(d => {
+      const key = localDateKey(d.fecha);
+      if (!grupos[key]) grupos[key] = [];
+      grupos[key].push(d);
+    });
+
+    const html = Object.entries(grupos)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([key, items]) => {
+        const title = formatShortLocal(items[0].fecha);
+        const rows = items.map(d => {
+          const porcentajeCalc = ((d.gananciasEsperada / d.subtotal) * 100).toFixed(0);
+          const candyId = d.candyId?._id ? d.candyId._id.toString() : d.candyId?.toString?.() || d.candyId;
+          const disponibles = stockPorCandy[candyId]?.disponibles ?? 0;
+          const exhausted = disponibles <= 0;
+          const low = !exhausted && disponibles <= 5;
+          const estado = exhausted
+            ? `<span class="badge-empty">Agotado</span>`
+            : low
+              ? `<span class="badge-low">Pocas piezas</span>`
+              : `<span class="badge-recovered">Disponible</span>`;
+
+          return `
+            <tr class="${exhausted ? 'row-empty' : ''}">
+              <td>
+                <div class="font-bold">${new Date(d.fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</div>
+                <div class="text-xs text-gray-400">${title}</div>
+              </td>
+              <td>
+                <div class="font-bold">${d.candyId?.nombre || '—'}</div>
+                <div class="text-xs text-gray-400">${d.cantidad} piezas entregadas</div>
+              </td>
+              <td class="font-bold text-orange-600">${money(d.subtotal)}</td>
+              <td>
+                <div class="font-bold text-purple-600">${money(d.gananciasEsperada)}</div>
+                <div class="text-xs text-purple-500">(${porcentajeCalc}%)</div>
+              </td>
+              <td>
+                <input type="number" class="w-20 px-2 py-1 border rounded text-sm"
+                  value="${d.montoDevuelto}"
+                  placeholder="$0"
+                  onchange="updateDistribucionPagado('${d._id}', this.value, ${d.gananciasEsperada})"/>
+              </td>
+              <td>
+                <div class="flex flex-col gap-1">
+                  ${estado}
+                  <button class="text-red-500 hover:text-red-700 text-lg" onclick="deleteDistribucion('${d._id}')">🗑</button>
+                </div>
+              </td>
+            </tr>`;
+        }).join('');
+
+        return `
+          <div class="mb-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="font-bold text-gray-600">📅 ${title}</div>
+              <div class="text-xs text-gray-400 font-bold">${items.length} entrega${items.length !== 1 ? 's' : ''}</div>
+            </div>
+            <table style="width:100%; border-collapse:collapse">
+              <thead style="background:#f0f0f0; font-weight:700; text-align:left">
+                <tr style="border-bottom:2px solid #ddd">
+                  <th style="padding:10px">Hora</th>
+                  <th style="padding:10px">Producto</th>
+                  <th style="padding:10px; text-align:right">Costo</th>
+                  <th style="padding:10px; text-align:right">Ganancia (12%)</th>
+                  <th style="padding:10px">Dinero Devuelto</th>
+                  <th style="padding:10px">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      }).join('');
+
+    $('distribucion-table').innerHTML = html;
   } catch (e) {
     console.error('loadDistribuciones:', e);
   }
@@ -1831,11 +1971,11 @@ async function deleteDistribucion(id) {
   }
 }
 
-async function updateDistribucionPagado(id, montoDevuelto) {
+async function updateDistribucionPagado(id, montoDevuelto, gananciasEsperada = 0) {
   try {
     await api(`/distribuciones/${id}`, {
       method: 'PUT',
-      body: { montoDevuelto: parseFloat(montoDevuelto) || 0 }
+      body: { montoDevuelto: parseFloat(montoDevuelto) || 0, gananciasEsperada }
     });
     toast('✅ Actualizado', 'success');
     loadDistribuciones();
@@ -1849,56 +1989,66 @@ async function updateDistribucionPagado(id, montoDevuelto) {
 //  TICKET DIARIO COMPAÑERA
 // ═══════════════════════════════════════════════════════════
 function ticketCompanera(ventaId) {
-  api('/ventas/hoy').then(data => {
-    const venta = data.ventas.find(v => v._id === ventaId);
+  const venta = S.ventas.find(v => v._id === ventaId);
+  if (venta) {
+    renderTicketCompanera(venta);
+    return;
+  }
+
+  api('/ventas?limite=250').then(data => {
+    const venta = data.find(v => v._id === ventaId);
     if (!venta) { toast('Venta no encontrada', 'err'); return; }
-
-    const items = venta.detalles.filter(d => d.cantidadVendida > 0);
-    const itemRows = items.map(d =>
-      `<tr>
-        <td style="padding:4px 6px">${d.nombreDulce}</td>
-        <td style="padding:4px 6px;text-align:center">${d.cantidadVendida}</td>
-        <td style="padding:4px 6px;text-align:right">$${d.precioUnitario.toFixed(2)}</td>
-        <td style="padding:4px 6px;text-align:right"><b>$${d.subtotal.toFixed(2)}</b></td>
-      </tr>`).join('');
-
-    document.getElementById('ticket-companera-content').innerHTML = `
-      <div id="ticket-companera-printable" style="font-family:monospace;font-size:13px;max-width:300px;margin:auto">
-        <div style="text-align:center;margin-bottom:8px">
-          <div style="font-size:22px">🍬</div>
-          <div style="font-size:15px;font-weight:bold">DULCERÍA - COMPROBANTE</div>
-          <div style="font-size:11px;color:#888">PARA: COMPAÑERA VENDEDORA</div>
-          <div style="font-size:11px;color:#666">${formatDate(new Date())} · ${formatTime(venta.fecha)}</div>
-        </div>
-        <hr style="border:1px dashed #ccc;margin:8px 0"/>
-        <div style="font-size:11px;font-weight:bold;margin-bottom:4px">PRODUCTOS VENDIDOS:</div>
-        <table style="width:100%;border-collapse:collapse;font-size:11px">
-          <thead><tr style="border-bottom:1px solid #ccc">
-            <th style="text-align:left;padding:3px 6px">Dulce</th>
-            <th style="padding:3px 6px">Cant</th>
-            <th style="text-align:right;padding:3px 6px">P.U.</th>
-            <th style="text-align:right;padding:3px 6px">Total</th>
-          </tr></thead>
-          <tbody>${itemRows}</tbody>
-        </table>
-        <hr style="border:1px dashed #ccc;margin:8px 0"/>
-        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
-          <span>Total ventas:</span><b style="color:#FF7849">$${venta.totalEsperado.toFixed(2)}</b>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
-          <span>Recibido:</span><b>$${venta.totalRecibido.toFixed(2)}</b>
-        </div>
-        <hr style="border:1px dashed #ccc;margin:8px 0"/>
-        <div style="background:#FFF8E7;padding:10px;border-radius:6px;text-align:center">
-          <div style="font-size:11px;font-weight:bold;margin-bottom:4px">💰 TU COMISIÓN (12%)</div>
-          <div style="font-size:28px;font-weight:bold;color:#f0a000">$${venta.comisionCalculada.toFixed(2)}</div>
-          <div style="font-size:10px;color:#888;margin-top:2px">¡Gracias por tu venta! 🍬</div>
-        </div>
-        <hr style="border:1px dashed #ccc;margin:8px 0"/>
-        <div style="text-align:center;font-size:10px;color:#aaa">Generado: ${new Date().toLocaleString('es-MX')}</div>
-      </div>`;
-    document.getElementById('modal-ticket-companera').style.display = 'flex';
+    S.ventas = data;
+    renderTicketCompanera(venta);
   }).catch(() => toast('Error al cargar venta', 'err'));
+}
+
+function renderTicketCompanera(venta) {
+  const items = venta.detalles.filter(d => d.cantidadVendida > 0);
+  const itemRows = items.map(d =>
+    `<tr>
+      <td style="padding:4px 6px">${d.nombreDulce}</td>
+      <td style="padding:4px 6px;text-align:center">${d.cantidadVendida}</td>
+      <td style="padding:4px 6px;text-align:right">$${d.precioUnitario.toFixed(2)}</td>
+      <td style="padding:4px 6px;text-align:right"><b>$${d.subtotal.toFixed(2)}</b></td>
+    </tr>`).join('');
+
+  document.getElementById('ticket-companera-content').innerHTML = `
+    <div id="ticket-companera-printable" style="font-family:monospace;font-size:13px;max-width:300px;margin:auto">
+      <div style="text-align:center;margin-bottom:8px">
+        <div style="font-size:22px">🍬</div>
+        <div style="font-size:15px;font-weight:bold">DULCERÍA - COMPROBANTE</div>
+        <div style="font-size:11px;color:#888">PARA: COMPAÑERA VENDEDORA</div>
+        <div style="font-size:11px;color:#666">${formatDate(new Date(venta.fecha))} · ${formatTime(venta.fecha)}</div>
+      </div>
+      <hr style="border:1px dashed #ccc;margin:8px 0"/>
+      <div style="font-size:11px;font-weight:bold;margin-bottom:4px">PRODUCTOS VENDIDOS:</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead><tr style="border-bottom:1px solid #ccc">
+          <th style="text-align:left;padding:3px 6px">Dulce</th>
+          <th style="padding:3px 6px">Cant</th>
+          <th style="text-align:right;padding:3px 6px">P.U.</th>
+          <th style="text-align:right;padding:3px 6px">Total</th>
+        </tr></thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <hr style="border:1px dashed #ccc;margin:8px 0"/>
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+        <span>Total ventas:</span><b style="color:#FF7849">$${venta.totalEsperado.toFixed(2)}</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+        <span>Recibido:</span><b>$${venta.totalRecibido.toFixed(2)}</b>
+      </div>
+      <hr style="border:1px dashed #ccc;margin:8px 0"/>
+      <div style="background:#FFF8E7;padding:10px;border-radius:6px;text-align:center">
+        <div style="font-size:11px;font-weight:bold;margin-bottom:4px">💰 TU COMISIÓN (12%)</div>
+        <div style="font-size:28px;font-weight:bold;color:#f0a000">$${venta.comisionCalculada.toFixed(2)}</div>
+        <div style="font-size:10px;color:#888;margin-top:2px">¡Gracias por tu venta! 🍬</div>
+      </div>
+      <hr style="border:1px dashed #ccc;margin:8px 0"/>
+      <div style="text-align:center;font-size:10px;color:#aaa">Generado: ${new Date().toLocaleString('es-MX')}</div>
+    </div>`;
+  document.getElementById('modal-ticket-companera').style.display = 'flex';
 }
 
 function printTicketCompanera() {

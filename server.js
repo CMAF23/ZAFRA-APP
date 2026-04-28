@@ -29,6 +29,7 @@ const BACKUP_ON_WRITE = process.env.BACKUP_ON_WRITE !== 'false';
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, 'backups');
 const BACKUP_DEBOUNCE_MS = Number(process.env.BACKUP_DEBOUNCE_MS || 2000);
 const BACKUP_KEEP_FILES = Number(process.env.BACKUP_KEEP_FILES || 80);
+const APP_TIMEZONE_OFFSET_MINUTES = Number(process.env.APP_TIMEZONE_OFFSET_MINUTES || -360);
 
 let backupTimer = null;
 let backupRunning = false;
@@ -102,6 +103,29 @@ function scheduleMongoBackup(reason = 'api-write') {
     backupTimer = null;
     runMongoBackup(reason);
   }, BACKUP_DEBOUNCE_MS);
+}
+
+function getZonedDateParts(date, offsetMinutes = APP_TIMEZONE_OFFSET_MINUTES) {
+  const shifted = new Date(new Date(date).getTime() + (offsetMinutes * 60000));
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+  };
+}
+
+function getZonedDateKey(date, offsetMinutes = APP_TIMEZONE_OFFSET_MINUTES) {
+  const parts = getZonedDateParts(date, offsetMinutes);
+  const mm = String(parts.month).padStart(2, '0');
+  const dd = String(parts.day).padStart(2, '0');
+  return `${parts.year}-${mm}-${dd}`;
+}
+
+function getZonedDayBounds(date = new Date(), offsetMinutes = APP_TIMEZONE_OFFSET_MINUTES) {
+  const parts = getZonedDateParts(date, offsetMinutes);
+  const startUtc = Date.UTC(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0) - (offsetMinutes * 60000);
+  const endUtc = Date.UTC(parts.year, parts.month - 1, parts.day, 23, 59, 59, 999) - (offsetMinutes * 60000);
+  return { start: new Date(startUtc), end: new Date(endUtc) };
 }
 
 // ─────────────────────────────────────────────
@@ -426,8 +450,7 @@ app.get('/api/ventas', async (req, res) => {
 
 app.get('/api/ventas/hoy', async (req, res) => {
   try {
-    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
-    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const { start: inicio, end: fin } = getZonedDayBounds();
     const ventas = await Venta.find({ fecha: { $gte: inicio, $lte: fin } }).sort('-fecha');
     const totales = ventas.reduce((acc, v) => ({
       esperado:   acc.esperado   + v.totalEsperado,
@@ -559,18 +582,18 @@ app.delete('/api/ventas/:id', async (req, res) => {
 // ─────────────────────────────────────────────
 app.get('/api/distribuciones', async (req, res) => {
   try {
+    const { limite = 100 } = req.query;
     const distribuciones = await Distribucion.find()
       .populate('candyId')
       .sort('-fecha')
-      .limit(100);
+      .limit(+limite);
     res.json(distribuciones);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/distribuciones/hoy', async (req, res) => {
   try {
-    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
-    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const { start: inicio, end: fin } = getZonedDayBounds();
     const distribuciones = await Distribucion.find({ fecha: { $gte: inicio, $lte: fin } })
       .populate('candyId')
       .sort('-fecha');
@@ -655,12 +678,13 @@ app.delete('/api/distribuciones/:id', async (req, res) => {
 app.put('/api/distribuciones/:id', async (req, res) => {
   try {
     const { montoDevuelto, notas } = req.body;
+    const previa = await Distribucion.findById(req.params.id);
+    if (!previa) return res.status(404).json({ error: 'No encontrada' });
     const distribucion = await Distribucion.findByIdAndUpdate(
       req.params.id,
-      { montoDevuelto: +montoDevuelto, notas, pagado: +montoDevuelto >= req.body.gananciasEsperada },
+      { montoDevuelto: +montoDevuelto, notas, pagado: +montoDevuelto >= previa.gananciasEsperada },
       { new: true }
     );
-    if (!distribucion) return res.status(404).json({ error: 'No encontrada' });
     await distribucion.populate('candyId');
     res.json(distribucion);
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -721,8 +745,7 @@ app.post('/api/semanas/:id/cerrar', async (req, res) => {
 // ─────────────────────────────────────────────
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
-    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const { start: inicio, end: fin } = getZonedDayBounds();
 
     const ventasHoy = await Venta.find({ fecha: { $gte: inicio, $lte: fin } });
     const totalHoy     = ventasHoy.reduce((a, v) => a + v.totalEsperado, 0);
@@ -734,15 +757,15 @@ app.get('/api/dashboard', async (req, res) => {
     const bolsas = await Bolsa.find({ activa: true }).populate('candyId').sort('fechaCompra');
 
     // Ventas últimos 7 días para gráfica
-    const hace7 = new Date(); hace7.setDate(hace7.getDate() - 6); hace7.setHours(0, 0, 0, 0);
+    const hace7 = new Date(inicio.getTime() - (6 * 24 * 60 * 60 * 1000));
     const ventas7 = await Venta.find({ fecha: { $gte: hace7 } });
     const porDia = {};
     for (let i = 0; i < 7; i++) {
-      const d = new Date(hace7); d.setDate(d.getDate() + i);
-      porDia[d.toISOString().slice(0, 10)] = 0;
+      const d = new Date(hace7.getTime() + (i * 24 * 60 * 60 * 1000));
+      porDia[getZonedDateKey(d)] = 0;
     }
     for (const v of ventas7) {
-      const k = v.fecha.toISOString().slice(0, 10);
+      const k = getZonedDateKey(v.fecha);
       if (k in porDia) porDia[k] += v.totalEsperado;
     }
 
@@ -988,8 +1011,7 @@ app.post('/api/companera/venta', async (req, res) => {
  */
 app.get('/api/companera/ventas/hoy', async (req, res) => {
   try {
-    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
-    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const { start: inicio, end: fin } = getZonedDayBounds();
     const ventas = await Venta.find({
       source: 'companera',
       fecha: { $gte: inicio, $lte: fin },
@@ -1009,8 +1031,7 @@ app.get('/api/companera/ventas/hoy', async (req, res) => {
 app.get('/api/companera/comision', async (req, res) => {
   try {
     const semana = await getOrCreateCurrentWeek();
-    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
-    const fin    = new Date(); fin.setHours(23, 59, 59, 999);
+    const { start: inicio, end: fin } = getZonedDayBounds();
     const ventasHoy = await Venta.find({
       source: 'companera',
       fecha: { $gte: inicio, $lte: fin },
