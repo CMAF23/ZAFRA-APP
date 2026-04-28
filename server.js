@@ -315,6 +315,113 @@ async function addDistribution(candyId, cantidadEntregada) {
   }
 }
 
+function addToMap(map, key, value) {
+  if (!key) return;
+  map[key] = (map[key] || 0) + value;
+}
+
+async function getCompaneraStockSummary() {
+  const candies = await Candy.find({ activo: true }).sort('nombre').select('_id nombre precioUnitario');
+  const distribuciones = await Distribucion.find().select('candyId cantidad');
+  const ventas = await Venta.find({ source: 'companera' }).select('detalles');
+
+  const entregadasPorCandy = {};
+  for (const d of distribuciones) {
+    addToMap(entregadasPorCandy, d.candyId?.toString(), d.cantidad || 0);
+  }
+
+  const vendidasPorCandy = {};
+  for (const v of ventas) {
+    for (const det of v.detalles || []) {
+      addToMap(vendidasPorCandy, det.candyId?.toString(), det.cantidadVendida || 0);
+    }
+  }
+
+  return candies.map(c => {
+    const candyId = c._id.toString();
+    const totalEntregadas = entregadasPorCandy[candyId] || 0;
+    const vendidas = vendidasPorCandy[candyId] || 0;
+    const disponibles = Math.max(0, totalEntregadas - vendidas);
+    return {
+      candyId,
+      nombre: c.nombre,
+      precioUnitario: c.precioUnitario,
+      totalEntregadas,
+      vendidas,
+      disponibles,
+    };
+  }).filter(r => r.totalEntregadas > 0);
+}
+
+async function reconcileBolsasFromHistory() {
+  const candies = await Candy.find({ activo: true }).select('_id precioUnitario');
+  const distribuciones = await Distribucion.find().select('candyId cantidad');
+  const ventas = await Venta.find().select('source detalles');
+
+  const entregadasPorCandy = {};
+  for (const d of distribuciones) {
+    addToMap(entregadasPorCandy, d.candyId?.toString(), d.cantidad || 0);
+  }
+
+  const vendidasCompaneraPorCandy = {};
+  const vendidasAdminPorCandy = {};
+  for (const v of ventas) {
+    for (const det of v.detalles || []) {
+      const id = det.candyId?.toString();
+      const qty = det.cantidadVendida || 0;
+      if (!id || qty <= 0) continue;
+      if (v.source === 'companera') addToMap(vendidasCompaneraPorCandy, id, qty);
+      else addToMap(vendidasAdminPorCandy, id, qty);
+    }
+  }
+
+  let bolsasActualizadas = 0;
+  for (const candy of candies) {
+    const candyId = candy._id.toString();
+    const bolsas = await Bolsa.find({ candyId, activa: true }).sort('fechaCompra');
+    if (!bolsas.length) continue;
+
+    const totalEntregadas = entregadasPorCandy[candyId] || 0;
+    const totalVendidasCompanera = vendidasCompaneraPorCandy[candyId] || 0;
+    const totalVendidasAdmin = vendidasAdminPorCandy[candyId] || 0;
+
+    let porAsignarVendidas = totalVendidasCompanera + totalVendidasAdmin;
+    let porAsignarEntregadas = Math.max(0, totalEntregadas - totalVendidasCompanera);
+
+    for (const b of bolsas) {
+      b.piezasVendidas = 0;
+      b.piezasEntregadas = 0;
+      b.dineroRecuperado = 0;
+      b.gananciaAcumulada = 0;
+      b.recuperada = false;
+    }
+
+    for (const b of bolsas) {
+      if (porAsignarVendidas <= 0) break;
+      const deEsta = Math.min(porAsignarVendidas, b.piezasTotales || 0);
+      b.piezasVendidas = deEsta;
+      porAsignarVendidas -= deEsta;
+    }
+
+    for (const b of bolsas) {
+      if (porAsignarEntregadas <= 0) break;
+      const capacidad = Math.max(0, (b.piezasTotales || 0) - (b.piezasVendidas || 0));
+      if (capacidad <= 0) continue;
+      const deEsta = Math.min(porAsignarEntregadas, capacidad);
+      b.piezasEntregadas = deEsta;
+      porAsignarEntregadas -= deEsta;
+    }
+
+    for (const b of bolsas) {
+      recalcBolsaFinanzas(b, candy.precioUnitario || 0);
+      await b.save();
+      bolsasActualizadas += 1;
+    }
+  }
+
+  return { ok: true, bolsasActualizadas };
+}
+
 // Dispara backup automático en cada escritura HTTP exitosa.
 app.use('/api', (req, res, next) => {
   if (!BACKUP_ON_WRITE) return next();
@@ -626,6 +733,15 @@ app.get('/api/distribuciones/hoy', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/distribuciones/stock', async (req, res) => {
+  try {
+    const stock = await getCompaneraStockSummary();
+    res.json(stock);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/distribuciones', async (req, res) => {
   try {
     const { candyId, cantidad, notas } = req.body;
@@ -724,6 +840,15 @@ app.post('/api/bolsas/migrate', async (req, res) => {
       corregidas++;
     }
     res.json({ ok: true, msg: `${corregidas} bolsas corregidas`, actualizadas: corregidas });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/bolsas/reconciliar', async (req, res) => {
+  try {
+    const result = await reconcileBolsasFromHistory();
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1096,37 +1221,14 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server en http://0.0.0.0:${PORT}`);
 });
 mongoose.connection.once('open', () => {
-  console.log('🟢 Mongo listo, ejecutando migración...');
+  console.log('🟢 Mongo listo, ejecutando reconciliación de bolsas...');
 
   setTimeout(async () => {
     try {
-      const distribuciones = await Distribucion.find();
-
-      const distribucionPorCandy = {};
-      for (const d of distribuciones) {
-        const candyId = d.candyId.toString();
-        distribucionPorCandy[candyId] = (distribucionPorCandy[candyId] || 0) + d.cantidad;
-      }
-
-      let corregidas = 0;
-      for (const [candyId, totalDistribuido] of Object.entries(distribucionPorCandy)) {
-        const bolsas = await Bolsa.find({ candyId });
-        for (const b of bolsas) {
-          if (b.piezasVendidas >= totalDistribuido && b.piezasEntregadas === 0) {
-            b.piezasVendidas -= totalDistribuido;
-            b.piezasEntregadas = (b.piezasEntregadas || 0) + totalDistribuido;
-            b.dineroRecuperado = parseFloat((b.piezasVendidas * b.candyId?.precioUnitario || 0).toFixed(2));
-            b.recuperada = b.dineroRecuperado >= b.costoTotal;
-            await b.save();
-            corregidas++;
-            break;
-          }
-        }
-      }
-
-      console.log(`✅ Migración ejecutada (${corregidas} corregidas)`);
+      const result = await reconcileBolsasFromHistory();
+      console.log(`✅ Reconciliación ejecutada (${result.bolsasActualizadas} bolsas)`);
     } catch (e) {
-      console.log('⚠️ Migración omitida:', e.message);
+      console.log('⚠️ Reconciliación omitida:', e.message);
     }
   }, 500);
 });

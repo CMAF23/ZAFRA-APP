@@ -700,6 +700,7 @@ const S = {
   ventaHoy: null,
   ventas: [],
   vendidasHoy: {},
+  vendidasHoyByName: {},
 };
 
 // ─── UTILS ──────────────────────────────────────────────────
@@ -926,13 +927,14 @@ function renderSaleRows() {
     </tr>`).join('');
   $('sale-rows').innerHTML = rows || `<tr><td colspan="4" class="empty-state">Sin dulces</td></tr>`;
   calcTotals();
+  updateSaleSoldBadges();
 }
 
 function updateSaleSoldBadges() {
   S.candies.forEach(c => {
     const el = $('sold-' + c._id);
     if (!el) return;
-    const vendidas = S.vendidasHoy[c._id] || 0;
+    const vendidas = (S.vendidasHoy[c._id] || 0) || (S.vendidasHoyByName[c.nombre] || 0);
     el.textContent = `Vendidas hoy: ${vendidas}`;
     el.style.color = vendidas > 0 ? 'var(--green)' : 'var(--blue)';
   });
@@ -1084,14 +1086,17 @@ async function loadTodaySales() {
     ]);
     S.ventas = archive;
     const vendidasMap = {};
+    const vendidasByName = {};
     data.ventas.forEach(v => {
       (v.detalles || []).forEach(d => {
         const id = d.candyId?.toString?.() || d.candyId;
-        if (!id) return;
-        vendidasMap[id] = (vendidasMap[id] || 0) + (d.cantidadVendida || 0);
+        const qty = d.cantidadVendida || 0;
+        if (id) vendidasMap[id] = (vendidasMap[id] || 0) + qty;
+        if (!id && d.nombreDulce) vendidasByName[d.nombreDulce] = (vendidasByName[d.nombreDulce] || 0) + qty;
       });
     });
     S.vendidasHoy = vendidasMap;
+    S.vendidasHoyByName = vendidasByName;
     updateSaleSoldBadges();
 
     const el   = $('today-history');
@@ -1797,19 +1802,17 @@ async function loadRecomendaciones() {
 
 async function loadDistribuciones() {
   try {
-    const [hoyData, distribuciones, bolsas] = await Promise.all([
+    const [hoyData, distribuciones, bolsas, stockCompanera] = await Promise.all([
       api('/distribuciones/hoy'),
       api('/distribuciones?limite=250'),
       S.bolsas.length ? Promise.resolve(S.bolsas) : api('/bolsas'),
+      api('/distribuciones/stock'),
     ]);
 
     S.bolsas = bolsas;
 
-    const stockPorCandy = bolsas.reduce((acc, b) => {
-      const candyId = b.candyId?._id ? b.candyId._id.toString() : b.candyId?.toString?.() || b.candyId;
-      acc[candyId] = acc[candyId] || { disponibles: 0, nombre: b.candyId?.nombre || '—' };
-      acc[candyId].disponibles += Math.max(0, (b.piezasTotales || 0) - (b.piezasVendidas || 0) - (b.piezasEntregadas || 0));
-      if (b.candyId?.nombre) acc[candyId].nombre = b.candyId.nombre;
+    const stockPorCandy = stockCompanera.reduce((acc, s) => {
+      acc[s.candyId] = s;
       return acc;
     }, {});
 
