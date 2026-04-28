@@ -176,6 +176,22 @@
   /* No data state */
   .empty-state { text-align:center; padding:40px; color:var(--muted); }
   .empty-state .emoji { font-size:3rem; }
+
+  @media (max-width: 768px) {
+    .card { padding: 14px; border-radius: 14px; }
+    .section-title { font-size: 1.2rem; }
+    .kpi-val { font-size: 1.45rem; }
+    .kpi-lbl { font-size: .7rem; }
+    .btn { width: 100%; justify-content: center; padding: 10px 12px; }
+    .btn-sm { width: auto; }
+    .tbl th, .tbl td { padding: 8px 6px; font-size: .78rem; }
+    #received-input { font-size: 1.2rem; padding: 8px 12px; }
+    .modal-box { padding: 18px; border-radius: 16px; }
+    #toast { right: 12px; left: 12px; bottom: 12px; }
+    .toast-inner { justify-content: center; }
+    #app-header h1 { font-size: 1.2rem; }
+    .tab-btn { padding: 8px 14px; font-size: .78rem; }
+  }
 </style>
 </head>
 <body>
@@ -683,6 +699,7 @@ const S = {
   semana: null,
   ventaHoy: null,
   ventas: [],
+  vendidasHoy: {},
 };
 
 // ─── UTILS ──────────────────────────────────────────────────
@@ -898,6 +915,7 @@ function renderSaleRows() {
       <td>
         <div class="font-bold text-sm">${c.nombre}</div>
         <div class="text-xs text-gray-400">${c.piezasPorBolsa} pzas/bolsa</div>
+        <div class="text-xs font-bold" id="sold-${c._id}" style="color:var(--blue)">Vendidas hoy: ${S.vendidasHoy[c._id] || 0}</div>
       </td>
       <td class="font-bold" style="color:var(--orange)">${money(c.precioUnitario)}</td>
       <td>
@@ -908,6 +926,16 @@ function renderSaleRows() {
     </tr>`).join('');
   $('sale-rows').innerHTML = rows || `<tr><td colspan="4" class="empty-state">Sin dulces</td></tr>`;
   calcTotals();
+}
+
+function updateSaleSoldBadges() {
+  S.candies.forEach(c => {
+    const el = $('sold-' + c._id);
+    if (!el) return;
+    const vendidas = S.vendidasHoy[c._id] || 0;
+    el.textContent = `Vendidas hoy: ${vendidas}`;
+    el.style.color = vendidas > 0 ? 'var(--green)' : 'var(--blue)';
+  });
 }
 
 function calcTotals() {
@@ -1055,6 +1083,17 @@ async function loadTodaySales() {
       api('/ventas?limite=250'),
     ]);
     S.ventas = archive;
+    const vendidasMap = {};
+    data.ventas.forEach(v => {
+      (v.detalles || []).forEach(d => {
+        const id = d.candyId?.toString?.() || d.candyId;
+        if (!id) return;
+        vendidasMap[id] = (vendidasMap[id] || 0) + (d.cantidadVendida || 0);
+      });
+    });
+    S.vendidasHoy = vendidasMap;
+    updateSaleSoldBadges();
+
     const el   = $('today-history');
     if (!data.ventas.length) {
       el.innerHTML = `<div class="empty-state"><div class="emoji">📋</div><p>Sin registros hoy todavía</p></div>`;

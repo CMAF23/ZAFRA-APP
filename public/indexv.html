@@ -136,6 +136,25 @@
       .modal-sheet { border-radius: 0; max-height: none; padding: 0; }
       .btn-share, .btn-close-sheet, .sheet-handle { display: none; }
     }
+
+    @media (max-width: 768px) {
+      header { padding: 12px 14px 14px; }
+      header h1 { font-size: 1.05rem; }
+      .pill { padding: 8px 12px; font-size: .75rem; }
+      main { padding: 12px; }
+      .section-card { padding: 12px; border-radius: 14px; }
+      .sale-name { white-space: normal; overflow: visible; text-overflow: unset; line-height: 1.2; }
+      .q-btn { width: 32px; height: 32px; }
+      .q-input { width: 38px; }
+      .btn-save { padding: 13px; font-size: 1rem; }
+      #toast { max-width: calc(100vw - 24px); white-space: normal; text-align: center; }
+    }
+
+    @media (max-width: 380px) {
+      .stats-row { grid-template-columns: 1fr; }
+      .header-top { gap: 8px; }
+      .clock-badge { font-size: .72rem; padding: 4px 8px; }
+    }
   </style>
 </head>
 <body>

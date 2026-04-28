@@ -241,32 +241,51 @@ async function getOrCreateCurrentWeek() {
   return semana;
 }
 
+function recalcBolsaFinanzas(bolsa, precioUnitario) {
+  bolsa.dineroRecuperado = parseFloat((bolsa.piezasVendidas * precioUnitario).toFixed(2));
+  bolsa.gananciaAcumulada = parseFloat((bolsa.dineroRecuperado - bolsa.costoTotal).toFixed(2));
+  bolsa.recuperada = bolsa.dineroRecuperado >= bolsa.costoTotal;
+}
+
 /**
- * Actualiza inventario de bolsas (FIFO) al registrar una VENTA.
- * Atribuye piezas vendidas al lote más antiguo disponible primero.
+ * Actualiza inventario FIFO al registrar una venta.
+ * - source=admin: descuenta de piezas disponibles.
+ * - source=companera: mueve piezas de entregadas -> vendidas.
  */
-async function updateBolsas(candyId, cantidadVendida, precioUnitario) {
-  const bolsas = await Bolsa.find({
-    candyId,
-    activa: true,
-    $expr: { $lt: [
-      { $add: ['$piezasVendidas', '$piezasEntregadas'] },
-      '$piezasTotales'
-    ] },
-  }).sort('fechaCompra');
+async function updateBolsas(candyId, cantidadVendida, precioUnitario, source = 'admin') {
+  const bolsas = await Bolsa.find({ candyId, activa: true }).sort('fechaCompra');
 
   let restante = cantidadVendida;
+
+  if (source === 'companera') {
+    for (const b of bolsas) {
+      if (restante <= 0) break;
+      if (!b.piezasEntregadas || b.piezasEntregadas <= 0) continue;
+      const deEsta = Math.min(restante, b.piezasEntregadas);
+      b.piezasEntregadas -= deEsta;
+      b.piezasVendidas += deEsta;
+      recalcBolsaFinanzas(b, precioUnitario);
+      await b.save();
+      restante -= deEsta;
+    }
+  }
+
+  // Fallback: si faltan piezas por registrar, toma de las disponibles.
   for (const b of bolsas) {
     if (restante <= 0) break;
-    const usadas = b.piezasVendidas + b.piezasEntregadas;
-    const disponibles = b.piezasTotales - usadas;
+    const usadas = (b.piezasVendidas || 0) + (b.piezasEntregadas || 0);
+    const disponibles = Math.max(0, (b.piezasTotales || 0) - usadas);
+    if (disponibles <= 0) continue;
+
     const deEsta = Math.min(restante, disponibles);
-    b.piezasVendidas    += deEsta;
-    b.dineroRecuperado   = parseFloat((b.piezasVendidas * precioUnitario).toFixed(2));
-    b.gananciaAcumulada  = parseFloat((b.dineroRecuperado - b.costoTotal).toFixed(2));
-    b.recuperada         = b.dineroRecuperado >= b.costoTotal;
+    b.piezasVendidas += deEsta;
+    recalcBolsaFinanzas(b, precioUnitario);
     await b.save();
     restante -= deEsta;
+  }
+
+  if (restante > 0) {
+    console.warn(`⚠️ Stock insuficiente al registrar venta de ${candyId}. Faltó registrar: ${restante}`);
   }
 }
 
@@ -511,7 +530,7 @@ app.post('/api/ventas', async (req, res) => {
 
     // Actualizar inventario FIFO
     for (const d of detallesOk) {
-      await updateBolsas(d.candyId, d.cantidadVendida, d.precioUnitario);
+      await updateBolsas(d.candyId, d.cantidadVendida, d.precioUnitario, 'admin');
     }
 
     res.status(201).json(venta);
@@ -995,7 +1014,7 @@ app.post('/api/companera/venta', async (req, res) => {
     });
 
     for (const d of detallesOk) {
-      await updateBolsas(d.candyId, d.cantidadVendida, d.precioUnitario);
+      await updateBolsas(d.candyId, d.cantidadVendida, d.precioUnitario, 'companera');
     }
 
     res.status(201).json(venta);
