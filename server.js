@@ -856,7 +856,17 @@ app.delete('/api/ventas/:id', async (req, res) => {
       for (const b of bolsas) {
         if (restante <= 0) break;
         const devolver = Math.min(restante, b.piezasVendidas);
-        b.piezasVendidas -= devolver;
+        // Si la venta era registrada desde la compañera, al crear la venta
+        // se movieron piezas de `piezasEntregadas` -> `piezasVendidas`.
+        // Al eliminar la venta debemos revertir ese movimiento: restar
+        // `piezasVendidas` y devolverlas a `piezasEntregadas`.
+        if (venta.source === 'companera') {
+          b.piezasVendidas = Math.max(0, (b.piezasVendidas || 0) - devolver);
+          b.piezasEntregadas = (b.piezasEntregadas || 0) + devolver;
+        } else {
+          // Venta admin u otra: simplemente restituir piezasVendidas
+          b.piezasVendidas = Math.max(0, (b.piezasVendidas || 0) - devolver);
+        }
         recalcBolsaFinanzas(b, d.precioUnitario);
         await b.save();
         restante -= devolver;
@@ -1047,7 +1057,6 @@ app.post('/api/bolsas/migrate', async (req, res) => {
   try {
     const bolsas = await Bolsa.find({ dineroRecuperado: 0, piezasVendidas: { $gt: 0 } });
     let corregidas = 0;
-    for (const b of bolsas) {
       b.piezasEntregadas = (b.piezasEntregadas || 0) + b.piezasVendidas;
       b.piezasVendidas = 0;
       await b.save();
