@@ -2000,17 +2000,9 @@ async function loadDistribuciones() {
                   placeholder="$0"
                   onchange="updateDistribucionPagado('${d._id}', this.value)"/>
               </td>
-              <td style="vertical-align:top">
-                <div class="flex items-center gap-2">
-                  <input type="number" min="1" max="${disponibles}" value="1"
-                    class="w-20 px-2 py-1 border rounded text-sm"
-                    id="extra-${d._id}" />
-                  <button class="px-3 py-1 rounded bg-green-500 text-white text-xs font-bold"
-                    onclick="agregarMasDistribucion('${d._id}', ${disponibles})">
-                    + Agregar
-                  </button>
-                </div>
-                <div class="text-xs text-gray-400 mt-1">+ piezas a entregar</div>
+              <td style="vertical-align:top; text-align:center">
+                <div class="font-bold text-blue-600">${disponibles}</div>
+                <div class="text-xs text-gray-400">piezas disponibles</div>
               </td>
               <td style="vertical-align:top">
                 <div class="flex flex-col gap-1">
@@ -2035,7 +2027,7 @@ async function loadDistribuciones() {
                   <th style="padding:10px; width:26%">Producto</th>
                   <th style="padding:10px; text-align:right; width:14%">Costo</th>
                   <th style="padding:10px; width:16%">Dinero Devuelto</th>
-                  <th style="padding:10px; width:18%">Agregar más</th>
+                  <th style="padding:10px; width:18%; text-align:center">Disponibles Stock</th>
                   <th style="padding:10px; width:12%">Acciones</th>
                 </tr>
               </thead>
@@ -2043,7 +2035,6 @@ async function loadDistribuciones() {
             </table>
           </div>`;
       }).join('');
-
     $('distribucion-table').innerHTML = html;
   } catch (e) {
     console.error('loadDistribuciones:', e);
@@ -2163,36 +2154,6 @@ async function updateDistribucionPagado(id, montoDevuelto) {
     });
     toast('✅ Actualizado', 'success');
     loadDistribuciones();
-  } catch (e) {
-    toast(`❌ Error: ${e.message}`, 'error');
-  }
-}
-
-async function agregarMasDistribucion(id, disponibles) {
-  const input = $(`extra-${id}`);
-  const extra = Math.trunc(parseFloat(input?.value || '0'));
-
-  if (!extra || extra <= 0) {
-    toast('Ingresa una cantidad extra válida', 'error');
-    return;
-  }
-
-  if (extra > disponibles) {
-    toast(`❌ Solo hay ${disponibles} piezas disponibles`, 'error');
-    return;
-  }
-
-  if (!confirm(`¿Agregar ${extra} pieza${extra !== 1 ? 's' : ''} más a esta entrega?`)) return;
-
-  try {
-    await api(`/distribuciones/${id}`, {
-      method: 'PUT',
-      body: { cantidadExtra: extra }
-    });
-    toast('✅ Entrega actualizada', 'success');
-    loadDistribuciones();
-    loadInventario();
-    loadDashboard();
   } catch (e) {
     toast(`❌ Error: ${e.message}`, 'error');
   }
