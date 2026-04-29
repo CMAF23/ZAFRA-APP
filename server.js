@@ -429,25 +429,8 @@ async function getCompaneraStockSummary() {
 
 async function reconcileBolsasFromHistory() {
   const candies = await Candy.find({ activo: true }).select('_id precioUnitario');
-  const distribuciones = await Distribucion.find().select('candyId cantidad');
-  const ventas = await Venta.find().select('source detalles');
-
-  const entregadasPorCandy = {};
-  for (const d of distribuciones) {
-    addToMap(entregadasPorCandy, d.candyId?.toString(), d.cantidad || 0);
-  }
-
-  const vendidasCompaneraPorCandy = {};
-  const vendidasAdminPorCandy = {};
-  for (const v of ventas) {
-    for (const det of v.detalles || []) {
-      const id = det.candyId?.toString();
-      const qty = det.cantidadVendida || 0;
-      if (!id || qty <= 0) continue;
-      if (v.source === 'companera') addToMap(vendidasCompaneraPorCandy, id, qty);
-      else addToMap(vendidasAdminPorCandy, id, qty);
-    }
-  }
+  const distribuciones = await Distribucion.find().select('candyId cantidad fecha');
+  const ventas = await Venta.find().select('source detalles fecha');
 
   let bolsasActualizadas = 0;
   for (const candy of candies) {
@@ -455,9 +438,29 @@ async function reconcileBolsasFromHistory() {
     const bolsas = await Bolsa.find({ candyId, activa: true }).sort('fechaCompra');
     if (!bolsas.length) continue;
 
-    const totalEntregadas = entregadasPorCandy[candyId] || 0;
-    const totalVendidasCompanera = vendidasCompaneraPorCandy[candyId] || 0;
-    const totalVendidasAdmin = vendidasAdminPorCandy[candyId] || 0;
+    // Importante: solo considerar movimientos del ciclo activo de bolsas.
+    // Esto evita que una bolsa nueva herede ventas historicas de ciclos previos.
+    const fechaCiclo = bolsas[0].fechaCompra;
+
+    let totalEntregadas = 0;
+    for (const d of distribuciones) {
+      if (d.candyId?.toString() !== candyId) continue;
+      if (d.fecha < fechaCiclo) continue;
+      totalEntregadas += d.cantidad || 0;
+    }
+
+    let totalVendidasCompanera = 0;
+    let totalVendidasAdmin = 0;
+    for (const v of ventas) {
+      if (v.fecha < fechaCiclo) continue;
+      for (const det of v.detalles || []) {
+        if (det.candyId?.toString() !== candyId) continue;
+        const qty = det.cantidadVendida || 0;
+        if (qty <= 0) continue;
+        if (v.source === 'companera') totalVendidasCompanera += qty;
+        else totalVendidasAdmin += qty;
+      }
+    }
 
     let porAsignarVendidas = totalVendidasCompanera + totalVendidasAdmin;
     let porAsignarEntregadas = Math.max(0, totalEntregadas - totalVendidasCompanera);
