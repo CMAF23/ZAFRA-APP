@@ -1295,6 +1295,11 @@ app.get('/api/agotados', async (req, res) => {
  */
 app.post('/api/agotados/archivar-bolsa/:bolsaId', async (req, res) => {
   try {
+    // Validar que el ID sea un ObjectId válido
+    if (!mongoose.Types.ObjectId.isValid(req.params.bolsaId)) {
+      return res.status(400).json({ error: 'ID de bolsa inválido' });
+    }
+
     const bolsa = await Bolsa.findById(req.params.bolsaId).populate('candyId');
     if (!bolsa) return res.status(404).json({ error: 'Bolsa no encontrada' });
 
@@ -1321,9 +1326,10 @@ app.post('/api/agotados/archivar-bolsa/:bolsaId', async (req, res) => {
     await Bolsa.findByIdAndUpdate(req.params.bolsaId, { activa: false });
 
     scheduleMongoBackup('archivar-bolsa');
-    res.json({ message: '✅ Bolsa archivada', agotado });
+    res.json({ ok: true, message: '✅ Bolsa archivada', agotado });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Error archivando bolsa:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -1333,6 +1339,11 @@ app.post('/api/agotados/archivar-bolsa/:bolsaId', async (req, res) => {
  */
 app.post('/api/agotados/archivar-distribucion/:distribucionId', async (req, res) => {
   try {
+    // Validar que el ID sea un ObjectId válido
+    if (!mongoose.Types.ObjectId.isValid(req.params.distribucionId)) {
+      return res.status(400).json({ error: 'ID de distribución inválido' });
+    }
+
     const dist = await Distribucion.findById(req.params.distribucionId).populate('candyId');
     if (!dist) return res.status(404).json({ error: 'Distribución no encontrada' });
 
@@ -1356,9 +1367,10 @@ app.post('/api/agotados/archivar-distribucion/:distribucionId', async (req, res)
     await Distribucion.findByIdAndUpdate(req.params.distribucionId, { pagado: true });
 
     scheduleMongoBackup('archivar-distribucion');
-    res.json({ message: '✅ Distribución archivada', agotado });
+    res.json({ ok: true, message: '✅ Distribución archivada', agotado });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Error archivando distribución:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

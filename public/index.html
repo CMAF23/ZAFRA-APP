@@ -2435,19 +2435,23 @@ async function archivarBolsa(bolsaId) {
   if (notas === null) return;
   
   try {
-    const resp = await api(`/api/agotados/archivar-bolsa/${bolsaId}`, {
+    const resp = await fetch(`/api/agotados/archivar-bolsa/${bolsaId}`, {
       method: 'POST',
-      body: { notas }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notas })
     });
-    if (resp.ok || resp.agotado) {
+
+    const data = await resp.json();
+    
+    if (resp.ok || data.ok) {
       toast('✅ Bolsa archivada exitosamente', 'success');
       loadInventario();
       loadAgotados();
     } else {
-      toast('Error al archivar bolsa', 'error');
+      toast('❌ Error: ' + (data.error || 'No se pudo archivar'), 'error');
     }
   } catch (err) {
-    toast('Error: ' + err.message, 'error');
+    toast('❌ Error al archivar: ' + err.message, 'error');
   }
 }
 
@@ -2456,19 +2460,23 @@ async function archivarDistribucion(distribucionId) {
   if (notas === null) return;
   
   try {
-    const resp = await api(`/api/agotados/archivar-distribucion/${distribucionId}`, {
+    const resp = await fetch(`/api/agotados/archivar-distribucion/${distribucionId}`, {
       method: 'POST',
-      body: { notas }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notas })
     });
-    if (resp.ok || resp.agotado) {
+
+    const data = await resp.json();
+    
+    if (resp.ok || data.ok) {
       toast('✅ Distribución archivada exitosamente', 'success');
-      loadDistribucion();
+      loadDistribuciones();
       loadAgotados();
     } else {
-      toast('Error al archivar distribución', 'error');
+      toast('❌ Error: ' + (data.error || 'No se pudo archivar'), 'error');
     }
   } catch (err) {
-    toast('Error: ' + err.message, 'error');
+    toast('❌ Error al archivar: ' + err.message, 'error');
   }
 }
 
