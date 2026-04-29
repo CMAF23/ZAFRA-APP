@@ -1100,6 +1100,8 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
   const gananciaNeta = (v.totalEsperado - v.comisionCalculada).toFixed(2);
   const fechaTxt = showDate ? `${formatShortLocal(v.fecha)} · ${formatTime(v.fecha)}` : formatTime(v.fecha);
   const estaPagada = Boolean(v.pagado);
+  const recibidoTxt = estaPagada ? `$${gananciaNeta}` : money(v.totalRecibido);
+  const diferenciaTxt = estaPagada ? money(0) : `${v.diferencia>=0?'+':''}${money(v.diferencia)}`;
 
   return `
   <div class="card mb-2" style="background:#F9FAFB; border-left:3px solid var(--orange)">
@@ -1135,9 +1137,9 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
     </div>
 
     <div class="flex gap-4 mt-2 text-xs font-bold">
-      <span>Recibido: <span class="text-purple-600">${money(v.totalRecibido)}</span></span>
-      <span class="${v.diferencia>=0?'text-green-600':'text-red-500'}">
-        Dif: ${v.diferencia>=0?'+':''}${money(v.diferencia)}</span>
+      <span>Recibido: <span class="text-purple-600">${recibidoTxt}</span></span>
+      <span class="${estaPagada ? 'text-green-600' : (v.diferencia>=0?'text-green-600':'text-red-500')}">
+        Dif: ${diferenciaTxt}</span>
     </div>
     ${v.notas ? `<div class="text-xs text-gray-400 mt-1">📝 ${v.notas}</div>` : ''}
     <div class="mt-3" style="display:flex;gap:8px;flex-wrap:wrap">
