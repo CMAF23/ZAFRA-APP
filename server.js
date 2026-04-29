@@ -218,6 +218,28 @@ const distribucionSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Distribucion = mongoose.model('Distribucion', distribucionSchema);
 
+/**
+ * ProductoAgotado = Registro histórico de productos que se agotaron.
+ * Guarda información de bolsas/distribuciones archivadas con fecha exacta de agotamiento.
+ */
+const productoAgotadoSchema = new mongoose.Schema({
+  tipo:              { type: String, enum: ['bolsa', 'distribucion'], required: true },
+  candyId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Candy', required: true },
+  nombreDulce:       String,
+  cantidad:          { type: Number, required: true },        // piezas totales o cantidad entregada
+  costoTotal:        { type: Number, default: 0 },            // para bolsas
+  precioUnitario:    { type: Number, default: 0 },
+  dineroRecuperado:  { type: Number, default: 0 },            // para bolsas
+  gananciaAcumulada: { type: Number, default: 0 },            // para bolsas
+  fechaAgotamiento:  { type: Date, default: Date.now },       // cuándo se agotó
+  fechaCompra:       { type: Date },                           // para bolsas (cuándo se compró)
+  semana:            String,                                  // "2026-W17" o similar
+  bolsaId:           mongoose.Schema.Types.ObjectId,          // referencia a la bolsa (si aplica)
+  distribucionId:    mongoose.Schema.Types.ObjectId,          // referencia a la distribución (si aplica)
+  notas:             String,
+}, { timestamps: true });
+const ProductoAgotado = mongoose.model('ProductoAgotado', productoAgotadoSchema);
+
 // ─────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────
@@ -835,7 +857,7 @@ app.put('/api/distribuciones/:id', async (req, res) => {
   try {
     const { montoDevuelto, notas } = req.body;
     const previa = await Distribucion.findById(req.params.id);
-    if (!previa) return res.status(404).json({ error: 'No encontrada' });
+    if (!previa) return res.status(404).json({ error: 'No encn ontrada' });
     const distribucion = await Distribucion.findByIdAndUpdate(
       req.params.id,
       { montoDevuelto: +montoDevuelto, notas, pagado: +montoDevuelto >= previa.gananciasEsperada },
@@ -1230,6 +1252,161 @@ app.get('/api/companera/comision', async (req, res) => {
 // ─────────────────────────────────────────────
 //  CATCH-ALL → frontend
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+//  RUTAS: ARCHIVO DE PRODUCTOS AGOTADOS
+// ─────────────────────────────────────────────
+
+/**
+ * GET /api/agotados
+ * Lista todos los productos agotados, filtrados por tipo, fecha, etc.
+ */
+app.get('/api/agotados', async (req, res) => {
+  try {
+    const { tipo, dulce, mes, anio } = req.query;
+    let filtro = {};
+
+    if (tipo && ['bolsa', 'distribucion'].includes(tipo)) {
+      filtro.tipo = tipo;
+    }
+    if (dulce) {
+      filtro.candyId = mongoose.Types.ObjectId(dulce);
+    }
+    if (mes && anio) {
+      const start = new Date(anio, mes - 1, 1);
+      const end = new Date(anio, mes, 0, 23, 59, 59, 999);
+      filtro.fechaAgotamiento = { $gte: start, $lte: end };
+    }
+
+    const agotados = await ProductoAgotado
+      .find(filtro)
+      .populate('candyId', 'nombre')
+      .sort({ fechaAgotamiento: -1 })
+      .lean();
+
+    res.json(agotados);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/agotados/archivar-bolsa/:bolsaId
+ * Archiva una bolsa agotada.
+ */
+app.post('/api/agotados/archivar-bolsa/:bolsaId', async (req, res) => {
+  try {
+    const bolsa = await Bolsa.findById(req.params.bolsaId).populate('candyId');
+    if (!bolsa) return res.status(404).json({ error: 'Bolsa no encontrada' });
+
+    const semanaNum = new Date(bolsa.fechaCompra).toISOString().split('W')[1] || '';
+    const year = new Date(bolsa.fechaCompra).getFullYear();
+
+    const agotado = await ProductoAgotado.create({
+      tipo: 'bolsa',
+      candyId: bolsa.candyId._id,
+      nombreDulce: bolsa.candyId.nombre,
+      cantidad: bolsa.piezasTotales,
+      costoTotal: bolsa.costoTotal,
+      precioUnitario: bolsa.candyId.precioUnitario,
+      dineroRecuperado: bolsa.dineroRecuperado,
+      gananciaAcumulada: bolsa.gananciaAcumulada,
+      fechaAgotamiento: new Date(),
+      fechaCompra: bolsa.fechaCompra,
+      semana: `${year}-W${semanaNum}`,
+      bolsaId: bolsa._id,
+      notas: req.body.notas || '',
+    });
+
+    // Marcar bolsa como inactiva
+    await Bolsa.findByIdAndUpdate(req.params.bolsaId, { activa: false });
+
+    scheduleMongoBackup('archivar-bolsa');
+    res.json({ message: '✅ Bolsa archivada', agotado });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/agotados/archivar-distribucion/:distribucionId
+ * Archiva una distribución agotada.
+ */
+app.post('/api/agotados/archivar-distribucion/:distribucionId', async (req, res) => {
+  try {
+    const dist = await Distribucion.findById(req.params.distribucionId).populate('candyId');
+    if (!dist) return res.status(404).json({ error: 'Distribución no encontrada' });
+
+    const semanaNum = new Date(dist.fecha).toISOString().split('W')[1] || '';
+    const year = new Date(dist.fecha).getFullYear();
+
+    const agotado = await ProductoAgotado.create({
+      tipo: 'distribucion',
+      candyId: dist.candyId._id,
+      nombreDulce: dist.candyId.nombre,
+      cantidad: dist.cantidad,
+      precioUnitario: dist.precioUnitario,
+      fechaAgotamiento: new Date(),
+      fechaCompra: dist.fecha,
+      semana: `${year}-W${semanaNum}`,
+      distribucionId: dist._id,
+      notas: req.body.notas || '',
+    });
+
+    // Marcar distribución como pagada/entregada
+    await Distribucion.findByIdAndUpdate(req.params.distribucionId, { pagado: true });
+
+    scheduleMongoBackup('archivar-distribucion');
+    res.json({ message: '✅ Distribución archivada', agotado });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/agotados/resumen
+ * Resumen de productos agotados por mes/tipo.
+ */
+app.get('/api/agotados/resumen', async (req, res) => {
+  try {
+    const resumen = await ProductoAgotado.aggregate([
+      {
+        $group: {
+          _id: {
+            year: { $year: '$fechaAgotamiento' },
+            month: { $month: '$fechaAgotamiento' },
+            tipo: '$tipo',
+            candyId: '$candyId',
+            nombreDulce: '$nombreDulce',
+          },
+          cantidad: { $sum: '$cantidad' },
+          dineroRecuperado: { $sum: '$dineroRecuperado' },
+          ganancia: { $sum: '$gananciaAcumulada' },
+          items: { $sum: 1 },
+        },
+      },
+      { $sort: { '_id.year': -1, '_id.month': -1 } },
+    ]);
+
+    res.json(resumen);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/agotados/:id
+ * Elimina un registro de producto agotado.
+ */
+app.delete('/api/agotados/:id', async (req, res) => {
+  try {
+    await ProductoAgotado.findByIdAndDelete(req.params.id);
+    scheduleMongoBackup('eliminar-agotado');
+    res.json({ message: '✅ Registro eliminado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/vendedora', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'indexv.html'));
 });

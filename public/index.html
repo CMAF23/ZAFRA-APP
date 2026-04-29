@@ -217,6 +217,7 @@
       <button class="tab-btn" onclick="showTab('catalogo')">🍬 Catálogo</button>
       <button class="tab-btn" onclick="showTab('semana')">📅 Semana</button>
       <button class="tab-btn" onclick="showTab('recomendaciones')">🤖 Recomendaciones IA</button>
+      <button class="tab-btn" onclick="showTab('agotados')">📁 Archivo Agotados</button>
     </div>
   </div>
 </div>
@@ -523,6 +524,97 @@
     </div>
   </div>
 
+  <!-- ARCHIVE SECTION -->
+  <div id="tab-agotados" class="tab-content">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="section-title">📁 Archivo de Productos Agotados</h2>
+      <button class="btn btn-secondary" onclick="loadAgotados()">🔄 Recargar</button>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-6 bg-gradient-to-r from-pink-50 to-orange-50">
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-2 uppercase">Tipo</label>
+          <select id="filter-tipo-agotado" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium" onchange="loadAgotados()">
+            <option value="">Todos</option>
+            <option value="bolsa">Bolsas Compradas</option>
+            <option value="distribucion">Distribuciones</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-2 uppercase">Dulce</label>
+          <select id="filter-dulce-agotado" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium" onchange="loadAgotados()">
+            <option value="">Todos los dulces</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-2 uppercase">Mes</label>
+          <input type="month" id="filter-mes-agotado" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium" onchange="loadAgotados()">
+        </div>
+        <div class="flex items-end">
+          <button class="btn btn-secondary w-full" onclick="resetFiltrosAgotados()">Limpiar Filtros</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resumen estadi -->
+    <div id="agotados-resumen" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="card">
+        <div class="kpi">
+          <div class="kpi-val text-pink-600" id="agotados-count">0</div>
+          <div class="kpi-lbl">Productos Archivados</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="kpi">
+          <div class="kpi-val text-orange-600" id="agotados-bolsas">0</div>
+          <div class="kpi-lbl">Bolsas Agotadas</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="kpi">
+          <div class="kpi-val text-green-600" id="agotados-dinero">$0</div>
+          <div class="kpi-lbl">Dinero Recuperado</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="kpi">
+          <div class="kpi-val text-purple-600" id="agotados-ganancia">$0</div>
+          <div class="kpi-lbl">Ganancia Total</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card">
+      <div class="table-scroll">
+        <table class="table-main">
+          <thead>
+            <tr>
+              <th>📅 Fecha Agotada</th>
+              <th>🍬 Producto</th>
+              <th>📊 Cantidad</th>
+              <th>💵 Costo</th>
+              <th>💰 Recuperado</th>
+              <th>📈 Ganancia</th>
+              <th>📝 Notas</th>
+              <th>⚙️</th>
+            </tr>
+          </thead>
+          <tbody id="agotados-table">
+            <tr>
+              <td colspan="8" class="text-center py-8 text-gray-400">
+                <div class="emoji" style="font-size: 2rem; margin-bottom: 8px;">📁</div>
+                <p>Cargando archivo de agotados...</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /max-w-7xl -->
 
 <!-- ══════════════════════════════════════════
@@ -783,9 +875,12 @@ function showTab(tab) {
         (tab==='distribucion'&&el.textContent.includes('Distribución')) ||
         (tab==='catalogo'&&el.textContent.includes('Catálogo')) ||
         (tab==='semana'&&el.textContent.includes('Semana')) ||
-        (tab==='recomendaciones'&&el.textContent.includes('Recomendaciones')))
+        (tab==='recomendaciones'&&el.textContent.includes('Recomendaciones')) ||
+        (tab==='agotados'&&el.textContent.includes('Archivo')))
       el.classList.add('active');
   });
+  // Load appropriate data for tab
+  if (tab === 'agotados') loadAgotados();
 
   // Lazy load
   if (tab === 'dashboard')       loadDashboard();
@@ -1318,8 +1413,9 @@ function renderInventario(bolsas) {
       <td class="font-bold text-right" style="color:${b.gananciaAcumulada>=0?'var(--green)':'var(--red)'}">
         ${b.gananciaAcumulada>=0?'+':''}${money(b.gananciaAcumulada)}
       </td>
-      <td>
-        <button class="btn btn-danger btn-sm" onclick="deleteBolsa('${b._id}')">🗑️</button>
+      <td class="flex gap-2">
+        ${agotada ? `<button class="btn btn-secondary btn-sm" onclick="archivarBolsa('${b._id}')" title="Archivar como agotada">📁</button>` : ''}
+        <button class="btn btn-danger btn-sm" onclick="deleteBolsa('${b._id}')" title="Eliminar">🗑️</button>
       </td>
     </tr>`;
   }).join('');
@@ -1890,6 +1986,7 @@ async function loadDistribuciones() {
               <td>
                 <div class="flex flex-col gap-1">
                   ${estado}
+                  ${exhausted ? `<button class="text-purple-500 hover:text-purple-700 font-bold" onclick="archivarDistribucion('${d._id}')" title="Archivar como agotada">📁</button>` : ''}
                   <button class="text-red-500 hover:text-red-700 text-lg" onclick="deleteDistribucion('${d._id}')">🗑</button>
                 </div>
               </td>
@@ -2231,6 +2328,147 @@ async function reciboSemanalCompanera() {
     document.getElementById('modal-ticket-companera').style.display = 'flex';
   } catch(e) {
     toast('Error al generar recibo semanal', 'err');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ARCHIVO DE AGOTADOS
+// ═══════════════════════════════════════════════════════════
+
+async function loadAgotados() {
+  try {
+    const tipo = $('filter-tipo-agotado').value || '';
+    const dulce = $('filter-dulce-agotado').value || '';
+    const mes = $('filter-mes-agotado').value || '';
+    
+    let url = '/api/agotados?';
+    if (tipo) url += `tipo=${tipo}&`;
+    if (dulce) url += `dulce=${dulce}&`;
+    if (mes) {
+      const [year, month] = mes.split('-');
+      url += `anio=${year}&mes=${month}&`;
+    }
+
+    const agotados = await api(url);
+    
+    // Actualizar filtro de dulces si está vacío
+    if (!$('filter-dulce-agotado').innerHTML.includes('Klubi')) {
+      const dulces = S.candies || [];
+      let html = '<option value="">Todos los dulces</option>';
+      dulces.forEach(d => {
+        html += `<option value="${d._id}">${d.nombre}</option>`;
+      });
+      $('filter-dulce-agotado').innerHTML = html;
+    }
+
+    // Calcular estadísticas
+    let totalCount = agotados.length;
+    let bolsasCount = agotados.filter(a => a.tipo === 'bolsa').length;
+    let totalDinero = agotados.reduce((s, a) => s + (a.dineroRecuperado || 0), 0);
+    let totalGanancia = agotados.reduce((s, a) => s + (a.gananciaAcumulada || 0), 0);
+
+    $('agotados-count').textContent = totalCount;
+    $('agotados-bolsas').textContent = bolsasCount;
+    $('agotados-dinero').textContent = '$' + totalDinero.toFixed(2);
+    $('agotados-ganancia').textContent = '$' + totalGanancia.toFixed(2);
+
+    // Renderizar tabla
+    let html = '';
+    if (agotados.length === 0) {
+      html = `<tr>
+        <td colspan="8" class="text-center py-8 text-gray-400">
+          <div class="emoji" style="font-size: 2rem; margin-bottom: 8px;">📁</div>
+          <p>No hay productos agotados con estos filtros</p>
+        </td>
+      </tr>`;
+    } else {
+      agotados.forEach(a => {
+        const fechaAgotada = new Date(a.fechaAgotamiento).toLocaleDateString('es-MX', { 
+          weekday: 'short', year: '2-digit', month: 'short', day: 'numeric' 
+        });
+        const icon = a.tipo === 'bolsa' ? '🛍️' : '📦';
+        const color = a.tipo === 'bolsa' ? 'row-recovered' : '';
+        
+        html += `<tr class="${color}">
+          <td><strong>${fechaAgotada}</strong></td>
+          <td>${icon} ${a.nombreDulce}</td>
+          <td class="font-bold text-orange-600">${a.cantidad} pz</td>
+          <td>$${(a.costoTotal || 0).toFixed(2)}</td>
+          <td class="font-bold text-green-600">$${(a.dineroRecuperado || 0).toFixed(2)}</td>
+          <td class="font-bold text-purple-600">$${(a.gananciaAcumulada || 0).toFixed(2)}</td>
+          <td class="text-sm text-gray-500">${a.notas || '—'}</td>
+          <td class="text-center">
+            <button class="text-red-500 font-bold hover:text-red-700" onclick="if(confirm('¿Eliminar registro?')) deleteAgotado('${a._id}')">🗑️</button>
+          </td>
+        </tr>`;
+      });
+    }
+    $('agotados-table').innerHTML = html;
+  } catch (err) {
+    toast('Error al cargar agotados: ' + err.message, 'error');
+  }
+}
+
+function resetFiltrosAgotados() {
+  $('filter-tipo-agotado').value = '';
+  $('filter-dulce-agotado').value = '';
+  $('filter-mes-agotado').value = '';
+  loadAgotados();
+}
+
+async function deleteAgotado(id) {
+  try {
+    const resp = await api(`/api/agotados/${id}`, { method: 'DELETE' });
+    if (resp.ok || resp.message) {
+      toast('✅ Registro eliminado', 'success');
+      loadAgotados();
+    } else {
+      toast('Error al eliminar', 'error');
+    }
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+async function archivarBolsa(bolsaId) {
+  const notas = prompt('Notas sobre esta bolsa (opcional):');
+  if (notas === null) return;
+  
+  try {
+    const resp = await api(`/api/agotados/archivar-bolsa/${bolsaId}`, {
+      method: 'POST',
+      body: { notas }
+    });
+    if (resp.ok || resp.agotado) {
+      toast('✅ Bolsa archivada exitosamente', 'success');
+      loadInventario();
+      loadAgotados();
+    } else {
+      toast('Error al archivar bolsa', 'error');
+    }
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+async function archivarDistribucion(distribucionId) {
+  const notas = prompt('Notas sobre esta distribución (opcional):');
+  if (notas === null) return;
+  
+  try {
+    const resp = await api(`/api/agotados/archivar-distribucion/${distribucionId}`, {
+      method: 'POST',
+      body: { notas }
+    });
+    if (resp.ok || resp.agotado) {
+      toast('✅ Distribución archivada exitosamente', 'success');
+      loadDistribucion();
+      loadAgotados();
+    } else {
+      toast('Error al archivar distribución', 'error');
+    }
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
   }
 }
 
