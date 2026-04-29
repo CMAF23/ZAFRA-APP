@@ -382,6 +382,19 @@
       <button class="btn btn-primary" onclick="openAddBolsaModal()">➕ Agregar Bolsa</button>
     </div>
 
+    <div class="card mb-4">
+      <div class="flex gap-2 items-center mb-3">
+        <label class="text-sm font-bold">Filtrar por fecha:</label>
+        <select id="inv-date-filter" class="px-3 py-2 border rounded text-sm" onchange="loadInventario()">
+          <option value="all">Todas</option>
+          <option value="today">Hoy</option>
+          <option value="week">Esta semana</option>
+          <option value="month">Este mes</option>
+        </select>
+      </div>
+      <div id="inv-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;"></div>
+    </div>
+
     <div class="card">
       <div id="inventario-table" class="table-scroll">
         <div class="empty-state"><div class="emoji">📦</div><p>Cargando inventario…</p></div>
@@ -1375,7 +1388,33 @@ function printReceipt() {
 // ═══════════════════════════════════════════════════════════
 async function loadInventario() {
   try {
-    const bolsas = await api('/bolsas');
+    const allBolsas = await api('/bolsas');
+    const dateFilter = $('inv-date-filter')?.value || 'all';
+    
+    let bolsas = allBolsas;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    
+    if (dateFilter === 'today') {
+      bolsas = allBolsas.filter(b => {
+        const bDate = new Date(b.fechaCompra);
+        return bDate >= today;
+      });
+    } else if (dateFilter === 'week') {
+      bolsas = allBolsas.filter(b => {
+        const bDate = new Date(b.fechaCompra);
+        return bDate >= weekStart;
+      });
+    } else if (dateFilter === 'month') {
+      bolsas = allBolsas.filter(b => {
+        const bDate = new Date(b.fechaCompra);
+        return bDate >= monthStart;
+      });
+    }
+    
     S.bolsas = bolsas;
     renderInventario(bolsas);
   } catch {}
@@ -1448,6 +1487,25 @@ function renderInventario(bolsas) {
   const totalEntregadas = bolsas.reduce((a,b) => a+(b.piezasEntregadas||0), 0);
   const totalVendidas = bolsas.reduce((a,b) => a+(b.piezasVendidas||0), 0);
   const recuperadas = bolsas.filter(b=>b.recuperada).length;
+  
+  // Resumen para el filtro de fechas
+  const dateFilter = $('inv-date-filter')?.value || 'all';
+  let filterLabel = 'Todas las fechas';
+  if (dateFilter === 'today') filterLabel = 'Inversión de hoy';
+  else if (dateFilter === 'week') filterLabel = 'Inversión esta semana';
+  else if (dateFilter === 'month') filterLabel = 'Inversión este mes';
+  
+  const summaryHtml = bolsas.length > 0 ? `
+    <div style="padding: 12px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ff6b00;">
+      <div style="font-size: 12px; color: #666; font-weight: bold; margin-bottom: 4px;">${filterLabel}</div>
+      <div style="font-size: 18px; font-weight: bold; color: #d32f2f;">${money(totalInv)}</div>
+      <div style="font-size: 11px; color: #888; margin-top: 4px;">${bolsas.length} bolsa${bolsas.length !== 1 ? 's' : ''}</div>
+    </div>
+  ` : '';
+  
+  if ($('inv-summary')) {
+    $('inv-summary').innerHTML = summaryHtml;
+  }
 
   el.innerHTML = `
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-4 bg-gray-50 rounded-xl text-center">
