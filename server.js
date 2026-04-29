@@ -1269,7 +1269,12 @@ app.get('/api/agotados', async (req, res) => {
       filtro.tipo = tipo;
     }
     if (dulce) {
-      filtro.candyId = mongoose.Types.ObjectId(dulce);
+      // Evitar invocar la clase ObjectId como función (lanza "Class constructor ObjectId...")
+      // Mongoose acepta strings como valores de filtro para _id, por lo que simplemente
+      // usamos el id recibido si es válido. Si no es válido, omitimos el filtro.
+      if (mongoose.Types.ObjectId.isValid(dulce)) {
+        filtro.candyId = dulce;
+      }
     }
     if (mes && anio) {
       const start = new Date(anio, mes - 1, 1);
@@ -1285,6 +1290,7 @@ app.get('/api/agotados', async (req, res) => {
 
     res.json(agotados);
   } catch (err) {
+    console.error('GET /api/agotados ERROR', { query: req.query, stack: err.stack || err.message });
     res.status(500).json({ error: err.message });
   }
 });
