@@ -348,7 +348,7 @@
           </div>
           <hr class="mb-3"/>
           <div>
-            <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Comisión (12%)</div>
+            <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Comisión compañera</div>
             <div class="fredoka text-xl" id="comision-display" style="color:var(--green)">$0.00</div>
           </div>
         </div>
@@ -435,7 +435,7 @@
         <span class="text-xs text-gray-400 font-semibold">Precio de costo</span>
       </div>
       <div class="card kpi" style="border-left:4px solid var(--purple)">
-        <span class="kpi-lbl">Ganancia Esperada (12%)</span>
+        <span class="kpi-lbl">Ganancia Esperada</span>
         <span class="kpi-val" id="dist-ganancia-hoy" style="color:var(--purple)">$0.00</span>
         <span class="text-xs text-gray-400 font-semibold">A recibir</span>
       </div>
@@ -675,6 +675,11 @@
         <input id="candy-precio" type="number" step="0.5" class="form-input" required min="0" placeholder="2.00"/>
         <p class="text-xs text-gray-400 mt-1" id="candy-margin-preview"></p>
       </div>
+      <div class="mb-4">
+        <label class="form-label">Comisión compañera (%)</label>
+        <input id="candy-comision" type="number" step="1" class="form-input" required min="0" max="100" placeholder="12"/>
+        <p class="text-xs text-gray-400 mt-1">Usa 0 para productos temporales sin comisión, como Manguitos.</p>
+      </div>
       <button type="submit" class="btn btn-primary w-full">💾 Guardar</button>
     </form>
   </div>
@@ -789,7 +794,7 @@
           <div class="font-bold text-lg" id="dist-subtotal">$0.00</div>
         </div>
         <div>
-          <span class="text-xs text-gray-500">Ganancia esperada (12%)</span>
+          <span class="text-xs text-gray-500">Ganancia esperada</span>
           <div class="font-bold text-lg text-purple-600" id="dist-ganancia">$0.00</div>
         </div>
       </div>
@@ -1062,6 +1067,7 @@ function renderSaleRows() {
       <td>
         <div class="font-bold text-sm">${c.nombre}</div>
         <div class="text-xs text-gray-400">${c.piezasPorBolsa} pzas/bolsa</div>
+        <div class="text-xs text-gray-500">Comisión: ${(Number(c.commissionRate ?? 0.12) * 100).toFixed(0)}%</div>
         <div class="text-xs font-bold" id="sold-${c._id}" style="color:var(--blue)">Vendidas hoy: ${S.vendidasHoy[c._id] || 0}</div>
       </td>
       <td class="font-bold" style="color:var(--orange)">${money(c.precioUnitario)}</td>
@@ -1088,15 +1094,18 @@ function updateSaleSoldBadges() {
 
 function calcTotals() {
   let total = 0;
+  let comision = 0;
   S.candies.forEach(c => {
     const qty = parseFloat($('qty-' + c._id)?.value || 0);
     const sub = qty * c.precioUnitario;
+    const rate = Number(c.commissionRate ?? 0.12);
     total += sub;
+    comision += sub * (Number.isFinite(rate) ? rate : 0.12);
     const el = $('sub-' + c._id);
     if (el) el.textContent = money(sub);
   });
   $('total-esperado').textContent = money(total);
-  $('comision-display').textContent = money(total * 0.12);
+  $('comision-display').textContent = money(comision);
   calcDiff();
 }
 
@@ -1208,7 +1217,7 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
         <span>💰 Total venta:</span><span style="color:var(--orange)">${money(v.totalEsperado)}</span>
       </div>
       <div style="display:flex;justify-content:space-between;margin-bottom:2px;color:#E63946">
-        <span>👩 Comisión compañera (12%):</span><span>-${money(v.comisionCalculada)}</span>
+        <span>👩 Comisión compañera:</span><span>-${money(v.comisionCalculada)}</span>
       </div>
       <hr style="border:none;border-top:1px dashed #ddd;margin:4px 0;opacity:0.5"/>
       <div style="display:flex;justify-content:space-between;color:var(--green)">
@@ -1309,7 +1318,7 @@ async function loadTodaySales() {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
           <div><div class="text-xs text-gray-400 font-bold uppercase">Total Venta</div>
             <div class="font-bold text-orange-500">${money(tot.esperado)}</div></div>
-          <div><div class="text-xs text-gray-400 font-bold uppercase">Comisión (12%)</div>
+          <div><div class="text-xs text-gray-400 font-bold uppercase">Comisión compañera</div>
             <div class="font-bold text-red-500">-${money(tot.comision)}</div></div>
           <div><div class="text-xs text-gray-400 font-bold uppercase">Ganancia Neta</div>
             <div class="font-bold text-green-600">$${gananciaTotalNeta}</div></div>
@@ -1468,7 +1477,7 @@ function buildReceiptHTML({ titulo, fecha, itemRows, esperado, recibido, diffTxt
           <span>Venta total:</span><b>${esperado}</b>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px;color:#E63946">
-          <span>Comisión compañera (12%):</span><b>-${comision}</b>
+          <span>Comisión compañera:</span><b>-${comision}</b>
         </div>
         <hr style="border:1px dashed #ccc;margin:4px 0"/>
         <div style="display:flex;justify-content:space-between;font-weight:bold;color:#2DC653">
@@ -1736,33 +1745,116 @@ function renderCatalog() {
     el.innerHTML = `<div class="empty-state"><div class="emoji">🍬</div><p>Sin dulces registrados</p></div>`;
     return;
   }
-  const rows = S.candies.map(c => {
-    const ingresoBolsa  = c.piezasPorBolsa * c.precioUnitario;
-    const gananciaBolsa = ingresoBolsa - c.costoPorBolsa;
-    const margen        = (gananciaBolsa / c.costoPorBolsa * 100).toFixed(0);
-    return `
-    <tr>
-      <td class="font-bold">${c.nombre}</td>
-      <td class="text-center">${c.piezasPorBolsa}</td>
-      <td class="font-bold text-red-500">${money(c.costoPorBolsa)}</td>
-      <td class="text-xs text-gray-400">${money(c.costoPorBolsa / c.piezasPorBolsa)}</td>
-      <td>
-        <div class="flex items-center gap-2">
-          <span class="font-bold text-lg" style="color:var(--orange)">${money(c.precioUnitario)}</span>
-          <button class="btn btn-outline btn-sm" onclick="quickEditPrice('${c._id}','${c.nombre}',${c.precioUnitario})">✏️</button>
-        </div>
-      </td>
-      <td>
-        <div class="font-bold ${gananciaBolsa>=0?'text-green-600':'text-red-500'}">${money(ingresoBolsa)}</div>
-        <div class="text-xs text-gray-400">Gan: +${money(gananciaBolsa)} (${margen}%)</div>
-      </td>
-      <td>
-        <div class="flex gap-1">
-          <button class="btn btn-outline btn-sm" onclick="openCandyModal('${c._id}')">✏️ Editar</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteCandy('${c._id}')">🗑️</button>
-        </div>
-      </td>
-    </tr>`;
+  // Agrupar por `origen` para mostrar familias (p.ej. variantes de MANGOMITAS)
+  const families = {};
+  S.candies.forEach(c => {
+    const key = c.origen && c.origen.trim() ? c.origen.trim() : null;
+    if (key) {
+      families[key] = families[key] || [];
+      families[key].push(c);
+    } else {
+      // usar id como key para entradas sueltas
+      families[c._id] = families[c._id] || [];
+      families[c._id].push(c);
+    }
+  });
+
+  // Construir filas: para cada familia con origen mostramos un header y sus variantes
+  const rows = Object.keys(families).map(k => {
+    const group = families[k];
+    // si la clave es el nombre de un dulce existente, mostrar como familia
+    const base = S.candies.find(x => x.nombre === k);
+    if (base && group.length > 1) {
+      // header row
+      const header = `<tr class="" style="background:#FFF7ED"><td colspan="7" class="font-bold">🍭 ${base.nombre} · <span class="text-xs text-gray-500">${group.length} variantes</span></td></tr>`;
+      const children = group.map(c => {
+        const ingresoBolsa  = c.piezasPorBolsa * c.precioUnitario;
+        const gananciaBolsa = ingresoBolsa - c.costoPorBolsa;
+        const margen        = (gananciaBolsa / c.costoPorBolsa * 100).toFixed(0);
+        return `
+        <tr>
+          <td style="padding-left:18px">▸ ${c.nombre}</td>
+          <td class="text-center">${c.piezasPorBolsa}</td>
+          <td class="font-bold text-red-500">${money(c.costoPorBolsa)}</td>
+          <td class="text-xs text-gray-400">${money(c.costoPorBolsa / c.piezasPorBolsa)}</td>
+          <td>
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-lg" style="color:var(--orange)">${money(c.precioUnitario)}</span>
+              <button class="btn btn-outline btn-sm" onclick="quickEditPrice('${c._id}','${c.nombre}',${c.precioUnitario})">✏️</button>
+            </div>
+          </td>
+          <td>
+            <div class="font-bold ${gananciaBolsa>=0?'text-green-600':'text-red-500'}">${money(ingresoBolsa)}</div>
+            <div class="text-xs text-gray-400">Gan: +${money(gananciaBolsa)} (${margen}%)</div>
+          </td>
+          <td>
+            <div class="flex gap-1">
+              <button class="btn btn-outline btn-sm" onclick="openCandyModal('${c._id}')">✏️ Editar</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteCandy('${c._id}')">🗑️</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+      return header + children;
+    } else if (base && group.length === 1) {
+      // familia con un solo elemento: mostrarlo como fila normal
+      const c = group[0];
+      const ingresoBolsa  = c.piezasPorBolsa * c.precioUnitario;
+      const gananciaBolsa = ingresoBolsa - c.costoPorBolsa;
+      const margen        = (gananciaBolsa / c.costoPorBolsa * 100).toFixed(0);
+      return `
+      <tr>
+        <td class="font-bold">${c.nombre}</td>
+        <td class="text-center">${c.piezasPorBolsa}</td>
+        <td class="font-bold text-red-500">${money(c.costoPorBolsa)}</td>
+        <td class="text-xs text-gray-400">${money(c.costoPorBolsa / c.piezasPorBolsa)}</td>
+        <td>
+          <div class="flex items-center gap-2">
+            <span class="font-bold text-lg" style="color:var(--orange)">${money(c.precioUnitario)}</span>
+            <button class="btn btn-outline btn-sm" onclick="quickEditPrice('${c._id}','${c.nombre}',${c.precioUnitario})">✏️</button>
+          </div>
+        </td>
+        <td>
+          <div class="font-bold ${gananciaBolsa>=0?'text-green-600':'text-red-500'}">${money(ingresoBolsa)}</div>
+          <div class="text-xs text-gray-400">Gan: +${money(gananciaBolsa)} (${margen}%)</div>
+        </td>
+        <td>
+          <div class="flex gap-1">
+            <button class="btn btn-outline btn-sm" onclick="openCandyModal('${c._id}')">✏️ Editar</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteCandy('${c._id}')">🗑️</button>
+          </div>
+        </td>
+      </tr>`;
+    } else {
+      // claves que no corresponden a un nombre base (entradas sueltas)
+      const c = group[0];
+      const ingresoBolsa  = c.piezasPorBolsa * c.precioUnitario;
+      const gananciaBolsa = ingresoBolsa - c.costoPorBolsa;
+      const margen        = (gananciaBolsa / c.costoPorBolsa * 100).toFixed(0);
+      return `
+      <tr>
+        <td class="font-bold">${c.nombre}</td>
+        <td class="text-center">${c.piezasPorBolsa}</td>
+        <td class="font-bold text-red-500">${money(c.costoPorBolsa)}</td>
+        <td class="text-xs text-gray-400">${money(c.costoPorBolsa / c.piezasPorBolsa)}</td>
+        <td>
+          <div class="flex items-center gap-2">
+            <span class="font-bold text-lg" style="color:var(--orange)">${money(c.precioUnitario)}</span>
+            <button class="btn btn-outline btn-sm" onclick="quickEditPrice('${c._id}','${c.nombre}',${c.precioUnitario})">✏️</button>
+          </div>
+        </td>
+        <td>
+          <div class="font-bold ${gananciaBolsa>=0?'text-green-600':'text-red-500'}">${money(ingresoBolsa)}</div>
+          <div class="text-xs text-gray-400">Gan: +${money(gananciaBolsa)} (${margen}%)</div>
+        </td>
+        <td>
+          <div class="flex gap-1">
+            <button class="btn btn-outline btn-sm" onclick="openCandyModal('${c._id}')">✏️ Editar</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteCandy('${c._id}')">🗑️</button>
+          </div>
+        </td>
+      </tr>`;
+    }
   }).join('');
 
   el.innerHTML = `
@@ -1793,6 +1885,7 @@ function openCandyModal(id) {
   $('candy-piezas').value  = candy?.piezasPorBolsa || '';
   $('candy-costo').value   = candy?.costoPorBolsa || '';
   $('candy-precio').value  = candy?.precioUnitario || '';
+  $('candy-comision').value = candy?.commissionRate != null ? Math.round(Number(candy.commissionRate) * 100) : 12;
   $('candy-margin-preview').textContent = '';
   $('modal-candy').style.display = 'flex';
 
@@ -1822,6 +1915,7 @@ async function saveCandy(e) {
     piezasPorBolsa: parseInt($('candy-piezas').value),
     costoPorBolsa:  parseFloat($('candy-costo').value),
     precioUnitario: parseFloat($('candy-precio').value),
+    commissionRate: parseFloat($('candy-comision').value) / 100,
   };
   try {
     if (id) await api('/candies/' + id, { method: 'PUT', body });
@@ -1916,7 +2010,7 @@ function renderSemanaCard({ semana, ventas }) {
         <div class="text-xs text-gray-400">${semana.numeroDias} días registrados</div>
       </div>
       <div class="card" style="background:#F0FDF4">
-        <div class="text-xs text-gray-400 font-bold uppercase">Comisión total (12%)</div>
+        <div class="text-xs text-gray-400 font-bold uppercase">Comisión total</div>
         <div class="fredoka text-2xl text-green-600">${money(semana.totalComision)}</div>
         <div class="text-xs text-gray-400">A pagar el viernes</div>
       </div>
@@ -2021,7 +2115,7 @@ async function openWeeklyReceipt(semanaId) {
         <hr style="border:1px dashed #ccc;margin:8px 0"/>
         <div style="background:#F0FDF4;padding:8px;border-radius:4px">
           <div style="display:flex;justify-content:space-between">
-            <b>TOTAL A PAGAR (12%):</b>
+            <b>TOTAL A PAGAR:</b>
             <b style="color:green;font-size:16px">${money(semana.totalComision)}</b>
           </div>
         </div>
@@ -2264,7 +2358,9 @@ function updateDistribucionPrice() {
   const precioText = opt.text.match(/\$([0-9.]+)/)?.[1] || '0';
   const precio = parseFloat(precioText);
   const subtotal = cantidad * precio;
-  const ganancia = subtotal * 0.12;
+  const candy = S.candies.find(c => c._id === candyId);
+  const rate = Number(candy?.commissionRate ?? 0.12);
+  const ganancia = subtotal * (Number.isFinite(rate) ? rate : 0.12);
   
   $('dist-precio-unit').textContent = money(precio);
   $('dist-subtotal').textContent = money(subtotal);
@@ -2392,7 +2488,7 @@ function renderTicketCompanera(venta) {
       </div>
       <hr style="border:1px dashed #ccc;margin:8px 0"/>
       <div style="background:#FFF8E7;padding:10px;border-radius:6px;text-align:center">
-        <div style="font-size:11px;font-weight:bold;margin-bottom:4px">💰 TU COMISIÓN (12%)</div>
+        <div style="font-size:11px;font-weight:bold;margin-bottom:4px">💰 TU COMISIÓN</div>
         <div style="font-size:28px;font-weight:bold;color:#f0a000">$${venta.comisionCalculada.toFixed(2)}</div>
         <div style="font-size:10px;color:#888;margin-top:2px">¡Gracias por tu venta! 🍬</div>
       </div>
@@ -2453,7 +2549,7 @@ async function imprimirReciboDistribucion() {
             <span>Valor total:</span><b>$${totales.subtotal.toFixed(2)}</b>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:bold;color:#7B2FBE">
-            <span>Comisión a recibir (12%):</span><b>$${totales.gananciasEsperada.toFixed(2)}</b>
+            <span>Comisión a recibir:</span><b>$${totales.gananciasEsperada.toFixed(2)}</b>
           </div>
         </div>
         <hr style="border:1px dashed #ccc;margin:8px 0"/>
@@ -2512,7 +2608,7 @@ async function reciboSemanalCompanera() {
         </table>
         <hr style="border:1px dashed #ccc;margin:8px 0"/>
         <div style="background:#FFF8E7;padding:10px;border-radius:6px;text-align:center">
-          <div style="font-size:11px;font-weight:bold;margin-bottom:4px">💰 TOTAL COMISIÓN SEMANAL (12%)</div>
+          <div style="font-size:11px;font-weight:bold;margin-bottom:4px">💰 TOTAL COMISIÓN SEMANAL</div>
           <div style="font-size:30px;font-weight:bold;color:#f0a000">$${semana.totalComision.toFixed(2)}</div>
           <div style="font-size:10px;color:#888;margin-top:2px">${semana.numeroDias} días · ¡Excelente semana! 🌟</div>
         </div>
