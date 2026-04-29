@@ -381,8 +381,12 @@ async function getCompaneraStockSummary() {
     const candyBolsas = bolsasPorCandy[candyId] || [];
     const fechaCiclo = fechaCicloPorCandy[candyId] || null;
 
-    // disponibles = piezas que tiene la companera sin vender (FIFO truth)
-    const disponibles = candyBolsas.reduce((a, b) => a + (b.piezasEntregadas || 0), 0);
+    // disponibles = stock que le queda al ADMIN para distribuir más
+    // (piezasTotales - vendidas - ya entregadas a compañera)
+    const disponibles = candyBolsas.reduce((a, b) => {
+      const usadas = (b.piezasVendidas || 0) + (b.piezasEntregadas || 0);
+      return a + Math.max(0, (b.piezasTotales || 0) - usadas);
+    }, 0);
 
     // Contadores display: solo del ciclo activo (desde la bolsa activa mas antigua)
     let totalEntregadas = 0;
@@ -643,7 +647,49 @@ app.delete('/api/bolsas/:id', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// ─────────────────────────────────────────────
+/**
+ * PUT /api/bolsas/:id
+ * Corrige el total de piezas de una bolsa (ajuste manual de stock).
+ */
+app.put('/api/bolsas/:id', async (req, res) => {
+  try {
+    const { piezasTotales, notas } = req.body;
+    if (!piezasTotales || +piezasTotales < 1) {
+      return res.status(400).json({ error: 'piezasTotales debe ser mayor a 0' });
+    }
+    const bolsa = await Bolsa.findById(req.params.id);
+    if (!bolsa) return res.status(404).json({ error: 'Bolsa no encontrada' });
+
+    const nuevasPiezas = +piezasTotales;
+    const candy = await Candy.findById(bolsa.candyId);
+    const precio = candy?.precioUnitario || 0;
+
+    const totalUsadas = (bolsa.piezasVendidas || 0) + (bolsa.piezasEntregadas || 0);
+    if (nuevasPiezas < totalUsadas) {
+      return res.status(400).json({
+        error: 'No puede ser menor que las piezas ya usadas (' + totalUsadas + ' vendidas+entregadas)'
+      });
+    }
+
+    const costoUnitario = bolsa.piezasTotales > 0 ? bolsa.costoTotal / bolsa.piezasTotales : 0;
+    const nuevoCosto = parseFloat((costoUnitario * nuevasPiezas).toFixed(2));
+    const dineroRecuperado = parseFloat(((bolsa.piezasVendidas || 0) * precio).toFixed(2));
+    const gananciaAcumulada = parseFloat((dineroRecuperado - nuevoCosto).toFixed(2));
+    const recuperada = dineroRecuperado >= nuevoCosto;
+
+    const updates = { piezasTotales: nuevasPiezas, costoTotal: nuevoCosto, dineroRecuperado, gananciaAcumulada, recuperada };
+    if (notas !== undefined) updates.notas = notas;
+
+    const bolsaActualizada = await Bolsa.findByIdAndUpdate(req.params.id, updates, { new: true });
+    scheduleMongoBackup('corregir-bolsa');
+    res.json(bolsaActualizada);
+  } catch (e) {
+    console.error('PUT /api/bolsas/:id:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ────────────────────────────────────────────────
 //  ROUTES: VENTAS
 // ─────────────────────────────────────────────
 app.get('/api/ventas', async (req, res) => {
