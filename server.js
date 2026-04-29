@@ -184,6 +184,8 @@ const ventaSchema = new mongoose.Schema({
   comisionCalculada:  Number,   // totalEsperado * 0.12
   semanaId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Semana' },
   notas:              String,
+  pagado:             { type: Boolean, default: false },
+  fechaPago:          Date,
 }, { timestamps: true });
 const Venta = mongoose.model('Venta', ventaSchema);
 
@@ -686,6 +688,22 @@ app.post('/api/ventas', async (req, res) => {
     res.status(201).json(venta);
   } catch (e) {
     console.error('POST /api/ventas:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/ventas/:id/pagada', async (req, res) => {
+  try {
+    const venta = await Venta.findByIdAndUpdate(
+      req.params.id,
+      { pagado: true, fechaPago: new Date() },
+      { new: true }
+    );
+
+    if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
+    res.json(venta);
+  } catch (e) {
+    console.error('PATCH /api/ventas/:id/pagada:', e);
     res.status(500).json({ error: e.message });
   }
 });
