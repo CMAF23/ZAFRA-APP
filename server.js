@@ -620,6 +620,37 @@ app.delete('/api/bolsas/:id', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// PATCH /api/bolsas/:id  — corrige piezasTotales y/o notas de una bolsa
+app.patch('/api/bolsas/:id', async (req, res) => {
+  try {
+    const bolsa = await Bolsa.findById(req.params.id).populate('candyId');
+    if (!bolsa) return res.status(404).json({ error: 'Bolsa no encontrada' });
+
+    const { piezasTotales, notas } = req.body;
+
+    if (piezasTotales !== undefined) {
+      const nuevasPiezas = parseInt(piezasTotales, 10);
+      if (isNaN(nuevasPiezas) || nuevasPiezas < 1)
+        return res.status(400).json({ error: 'piezasTotales debe ser un número positivo' });
+      const usadas = (bolsa.piezasVendidas || 0) + (bolsa.piezasEntregadas || 0);
+      if (nuevasPiezas < usadas)
+        return res.status(400).json({ error: `No puedes poner menos piezas que las ya usadas (${usadas})` });
+      bolsa.piezasTotales = nuevasPiezas;
+    }
+
+    if (notas !== undefined) bolsa.notas = notas;
+
+    // Recalcular finanzas si cambió piezasTotales
+    if (bolsa.candyId?.precioUnitario != null) {
+      recalcBolsaFinanzas(bolsa, bolsa.candyId.precioUnitario);
+    }
+
+    await bolsa.save();
+    await bolsa.populate('candyId');
+    res.json(bolsa);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // ─────────────────────────────────────────────
 //  ROUTES: VENTAS
 // ─────────────────────────────────────────────

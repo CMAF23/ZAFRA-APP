@@ -718,6 +718,27 @@
   </div>
 </div>
 
+<!-- Modal Editar Bolsa -->
+<div id="modal-editar-bolsa" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="max-width:400px">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="modal-title">✏️ Corregir Piezas de Bolsa</h3>
+      <button onclick="closeModal('modal-editar-bolsa')" class="text-gray-400 hover:text-gray-700 text-2xl">✕</button>
+    </div>
+    <input type="hidden" id="editar-bolsa-id"/>
+    <div class="mb-3">
+      <label class="form-label">Piezas totales</label>
+      <input id="editar-bolsa-piezas" type="number" class="form-input" min="1" required/>
+      <div class="text-xs text-gray-400 mt-1">Cambia este número para corregir el stock total de esta bolsa.</div>
+    </div>
+    <div class="mb-4">
+      <label class="form-label">Notas (opcional)</label>
+      <input id="editar-bolsa-notas" class="form-input" placeholder="Ej: corrección de stock"/>
+    </div>
+    <button onclick="guardarEdicionBolsa()" class="btn btn-primary w-full">💾 Guardar Corrección</button>
+  </div>
+</div>
+
 <!-- Receipt Modal -->
 <div id="modal-receipt" class="modal-overlay" style="display:none">
   <div class="modal-box" style="max-width:400px">
@@ -1560,6 +1581,7 @@ function renderInventario(bolsas) {
       </td>
       <td class="flex gap-2">
         ${agotada ? `<button class="btn btn-secondary btn-sm" onclick="archivarBolsa('${b._id}')" title="Archivar como agotada">📁</button>` : ''}
+        <button class="btn btn-sm" style="background:#FFB800;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:14px" onclick="editarBolsa('${b._id}', ${b.piezasTotales}, \`${(b.notas||'').replace(/`/g,'\\`')}\`)" title="Editar piezas">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="deleteBolsa('${b._id}')" title="Eliminar">🗑️</button>
       </td>
     </tr>`;
@@ -1666,6 +1688,30 @@ async function deleteBolsa(id) {
   await api('/bolsas/' + id, { method: 'DELETE' });
   toast('Bolsa eliminada');
   loadInventario();
+}
+
+function editarBolsa(id, piezasTotales, notas) {
+  $('editar-bolsa-id').value = id;
+  $('editar-bolsa-piezas').value = piezasTotales;
+  $('editar-bolsa-notas').value = notas || '';
+  $('modal-editar-bolsa').style.display = 'flex';
+}
+
+async function guardarEdicionBolsa() {
+  const id = $('editar-bolsa-id').value;
+  const piezasTotales = parseInt($('editar-bolsa-piezas').value);
+  const notas = $('editar-bolsa-notas').value;
+  if (!id || isNaN(piezasTotales) || piezasTotales < 1) {
+    toast('Número de piezas inválido', true); return;
+  }
+  try {
+    await api('/bolsas/' + id, { method: 'PATCH', body: { piezasTotales, notas } });
+    toast('✅ Bolsa corregida');
+    closeModal('modal-editar-bolsa');
+    loadInventario();
+  } catch(e) {
+    toast(e.message || 'Error al guardar', true);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
