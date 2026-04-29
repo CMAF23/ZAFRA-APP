@@ -1973,7 +1973,6 @@ async function loadDistribuciones() {
       .map(([key, items]) => {
         const title = formatShortLocal(items[0].fecha);
         const rows = items.map(d => {
-          const porcentajeCalc = ((d.gananciasEsperada / d.subtotal) * 100).toFixed(0);
           const candyId = d.candyId?._id ? d.candyId._id.toString() : d.candyId?.toString?.() || d.candyId;
           const disponibles = stockPorCandy[candyId]?.disponibles ?? 0;
           const exhausted = disponibles <= 0;
@@ -1986,22 +1985,34 @@ async function loadDistribuciones() {
 
           return `
             <tr class="${exhausted ? 'row-empty' : ''}">
-              <td>
+              <td style="vertical-align:top">
                 <div class="font-bold">${new Date(d.fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</div>
+                <div class="text-xs text-gray-400">${title}</div>
+              </td>
+              <td style="vertical-align:top">
+                <div class="font-bold text-gray-700">${d.candyId?.nombre || '—'}</div>
                 <div class="text-xs text-gray-400">${d.cantidad} piezas entregadas</div>
               </td>
-              <td class="font-bold text-orange-600">${money(d.subtotal)}</td>
-              <td>
-                <div class="font-bold text-purple-600">${money(d.gananciasEsperada)}</div>
-                <div class="text-xs text-purple-500">(${porcentajeCalc}%)</div>
-              </td>
-              <td>
-                <input type="number" class="w-20 px-2 py-1 border rounded text-sm"
+              <td class="font-bold text-orange-600" style="vertical-align:top; text-align:right">${money(d.subtotal)}</td>
+              <td style="vertical-align:top">
+                <input type="number" class="w-24 px-2 py-1 border rounded text-sm"
                   value="${d.montoDevuelto}"
                   placeholder="$0"
-                  onchange="updateDistribucionPagado('${d._id}', this.value, ${d.gananciasEsperada})"/>
+                  onchange="updateDistribucionPagado('${d._id}', this.value)"/>
               </td>
-              <td>
+              <td style="vertical-align:top">
+                <div class="flex items-center gap-2">
+                  <input type="number" min="1" max="${disponibles}" value="1"
+                    class="w-20 px-2 py-1 border rounded text-sm"
+                    id="extra-${d._id}" />
+                  <button class="px-3 py-1 rounded bg-green-500 text-white text-xs font-bold"
+                    onclick="agregarMasDistribucion('${d._id}', ${disponibles})">
+                    + Agregar
+                  </button>
+                </div>
+                <div class="text-xs text-gray-400 mt-1">+ piezas a entregar</div>
+              </td>
+              <td style="vertical-align:top">
                 <div class="flex flex-col gap-1">
                   ${estado}
                   ${exhausted ? `<button class="text-purple-500 hover:text-purple-700 font-bold" onclick="archivarDistribucion('${d._id}')" title="Archivar como agotada">📁</button>` : ''}
@@ -2017,15 +2028,15 @@ async function loadDistribuciones() {
               <div class="font-bold text-gray-600">📅 ${title}</div>
               <div class="text-xs text-gray-400 font-bold">${items.length} entrega${items.length !== 1 ? 's' : ''}</div>
             </div>
-            <table style="width:100%; border-collapse:collapse">
+            <table style="width:100%; border-collapse:collapse; table-layout:fixed">
               <thead style="background:#f0f0f0; font-weight:700; text-align:left">
                 <tr style="border-bottom:2px solid #ddd">
-                  <th style="padding:10px">Hora</th>
-                  <th style="padding:10px">Producto</th>
-                  <th style="padding:10px; text-align:right">Costo</th>
-                  <th style="padding:10px; text-align:right">Ganancia (12%)</th>
-                  <th style="padding:10px">Dinero Devuelto</th>
-                  <th style="padding:10px">Acciones</th>
+                  <th style="padding:10px; width:14%">Hora</th>
+                  <th style="padding:10px; width:26%">Producto</th>
+                  <th style="padding:10px; text-align:right; width:14%">Costo</th>
+                  <th style="padding:10px; width:16%">Dinero Devuelto</th>
+                  <th style="padding:10px; width:18%">Agregar más</th>
+                  <th style="padding:10px; width:12%">Acciones</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -2144,14 +2155,44 @@ async function deleteDistribucion(id) {
   }
 }
 
-async function updateDistribucionPagado(id, montoDevuelto, gananciasEsperada = 0) {
+async function updateDistribucionPagado(id, montoDevuelto) {
   try {
     await api(`/distribuciones/${id}`, {
       method: 'PUT',
-      body: { montoDevuelto: parseFloat(montoDevuelto) || 0, gananciasEsperada }
+      body: { montoDevuelto: parseFloat(montoDevuelto) || 0 }
     });
     toast('✅ Actualizado', 'success');
     loadDistribuciones();
+  } catch (e) {
+    toast(`❌ Error: ${e.message}`, 'error');
+  }
+}
+
+async function agregarMasDistribucion(id, disponibles) {
+  const input = $(`extra-${id}`);
+  const extra = Math.trunc(parseFloat(input?.value || '0'));
+
+  if (!extra || extra <= 0) {
+    toast('Ingresa una cantidad extra válida', 'error');
+    return;
+  }
+
+  if (extra > disponibles) {
+    toast(`❌ Solo hay ${disponibles} piezas disponibles`, 'error');
+    return;
+  }
+
+  if (!confirm(`¿Agregar ${extra} pieza${extra !== 1 ? 's' : ''} más a esta entrega?`)) return;
+
+  try {
+    await api(`/distribuciones/${id}`, {
+      method: 'PUT',
+      body: { cantidadExtra: extra }
+    });
+    toast('✅ Entrega actualizada', 'success');
+    loadDistribuciones();
+    loadInventario();
+    loadDashboard();
   } catch (e) {
     toast(`❌ Error: ${e.message}`, 'error');
   }
