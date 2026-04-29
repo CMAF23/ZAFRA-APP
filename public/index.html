@@ -1988,10 +1988,6 @@ async function loadDistribuciones() {
             <tr class="${exhausted ? 'row-empty' : ''}">
               <td>
                 <div class="font-bold">${new Date(d.fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</div>
-                <div class="text-xs text-gray-400">${title}</div>
-              </td>
-              <td>
-                <div class="font-bold">${d.candyId?.nombre || '—'}</div>
                 <div class="text-xs text-gray-400">${d.cantidad} piezas entregadas</div>
               </td>
               <td class="font-bold text-orange-600">${money(d.subtotal)}</td>
@@ -2007,6 +2003,16 @@ async function loadDistribuciones() {
               </td>
               <td>
                 <div class="flex flex-col gap-1">
+                  <div class="flex items-center gap-2">
+                    <input type="number" min="1" max="${disponibles}" value="1"
+                      class="w-20 px-2 py-1 border rounded text-sm"
+                      id="extra-${d._id}" />
+                    <button class="px-3 py-1 rounded bg-green-500 text-white text-xs font-bold"
+                      onclick="agregarMasDistribucion('${d._id}', '${candyId}', ${disponibles}, ${d.montoDevuelto})">
+                      + Agregar
+                    </button>
+                  </div>
+                  <div class="text-xs text-gray-400">+ piezas a entregar</div>
                   ${estado}
                   ${exhausted ? `<button class="text-purple-500 hover:text-purple-700 font-bold" onclick="archivarDistribucion('${d._id}')" title="Archivar como agotada">📁</button>` : ''}
                   <button class="text-red-500 hover:text-red-700 text-lg" onclick="deleteDistribucion('${d._id}')">🗑</button>
@@ -2156,6 +2162,36 @@ async function updateDistribucionPagado(id, montoDevuelto, gananciasEsperada = 0
     });
     toast('✅ Actualizado', 'success');
     loadDistribuciones();
+  } catch (e) {
+    toast(`❌ Error: ${e.message}`, 'error');
+  }
+}
+
+async function agregarMasDistribucion(id, candyId, disponibles, montoDevueltoActual = 0) {
+  const input = $(`extra-${id}`);
+  const extra = Math.trunc(parseFloat(input?.value || '0'));
+
+  if (!extra || extra <= 0) {
+    toast('Ingresa una cantidad extra válida', 'error');
+    return;
+  }
+
+  if (extra > disponibles) {
+    toast(`❌ Solo hay ${disponibles} piezas disponibles`, 'error');
+    return;
+  }
+
+  if (!confirm(`¿Agregar ${extra} pieza${extra !== 1 ? 's' : ''} más a esta entrega?`)) return;
+
+  try {
+    await api(`/distribuciones/${id}`, {
+      method: 'PUT',
+      body: { cantidadExtra: extra, montoDevuelto: montoDevueltoActual }
+    });
+    toast('✅ Entrega actualizada', 'success');
+    loadDistribuciones();
+    loadInventario();
+    loadDashboard();
   } catch (e) {
     toast(`❌ Error: ${e.message}`, 'error');
   }
