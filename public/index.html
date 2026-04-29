@@ -2341,7 +2341,7 @@ async function loadAgotados() {
     const dulce = $('filter-dulce-agotado').value || '';
     const mes = $('filter-mes-agotado').value || '';
     
-    let url = '/api/agotados?';
+    let url = '/agotados?';
     if (tipo) url += `tipo=${tipo}&`;
     if (dulce) url += `dulce=${dulce}&`;
     if (mes) {
