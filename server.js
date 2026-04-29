@@ -347,8 +347,18 @@ function addToMap(map, key, value) {
 
 async function getCompaneraStockSummary() {
   const candies = await Candy.find({ activo: true }).sort('nombre').select('_id nombre precioUnitario');
+  const bolsas = await Bolsa.find({ activa: true }).select('candyId piezasTotales piezasVendidas piezasEntregadas');
   const distribuciones = await Distribucion.find().select('candyId cantidad');
   const ventas = await Venta.find({ source: 'companera' }).select('detalles');
+
+  // Calcula disponibles basado en bolsas de inventario
+  const disponiblesPorCandy = {};
+  for (const b of bolsas) {
+    const candyIdStr = b.candyId?.toString();
+    const usadas = (b.piezasVendidas || 0) + (b.piezasEntregadas || 0);
+    const disponibles = Math.max(0, (b.piezasTotales || 0) - usadas);
+    addToMap(disponiblesPorCandy, candyIdStr, disponibles);
+  }
 
   const entregadasPorCandy = {};
   for (const d of distribuciones) {
@@ -366,7 +376,7 @@ async function getCompaneraStockSummary() {
     const candyId = c._id.toString();
     const totalEntregadas = entregadasPorCandy[candyId] || 0;
     const vendidas = vendidasPorCandy[candyId] || 0;
-    const disponibles = Math.max(0, totalEntregadas - vendidas);
+    const disponibles = disponiblesPorCandy[candyId] || 0;
     return {
       candyId,
       nombre: c.nombre,
@@ -375,7 +385,7 @@ async function getCompaneraStockSummary() {
       vendidas,
       disponibles,
     };
-  }).filter(r => r.totalEntregadas > 0);
+  }).filter(r => r.totalEntregadas > 0 || r.disponibles > 0);
 }
 
 async function reconcileBolsasFromHistory() {
