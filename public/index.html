@@ -392,7 +392,10 @@
   <div id="tab-inventario" class="tab-content">
     <div class="flex items-center justify-between mb-4">
       <h2 class="section-title">📦 Inventario de Bolsas</h2>
-      <button class="btn btn-primary" onclick="openAddBolsaModal()">➕ Agregar Bolsa</button>
+      <div class="flex gap-2">
+        <button class="btn btn-outline" onclick="reconciliarInventarioAhora()">♻️ Reconciliar Inventario</button>
+        <button class="btn btn-primary" onclick="openAddBolsaModal()">➕ Agregar Bolsa</button>
+      </div>
     </div>
 
     <div class="card mb-4">
@@ -1709,6 +1712,22 @@ async function deleteBolsa(id) {
   await api('/bolsas/' + id, { method: 'DELETE' });
   toast('Bolsa eliminada');
   loadInventario();
+}
+
+async function reconciliarInventarioAhora() {
+  if (!confirm('¿Recalcular inventario ahora? Esto corregirá vendidas/entregadas/stock según el historial.')) return;
+  try {
+    const result = await api('/bolsas/reconciliar', { method: 'POST', body: {} });
+    toast(`✅ Inventario reconciliado (${result?.bolsasActualizadas || 0} bolsas)`);
+    await Promise.all([
+      loadInventario(),
+      loadDashboard(),
+      loadDistribuciones(),
+      loadTodaySales(),
+    ]);
+  } catch (e) {
+    toast(e.message || 'Error al reconciliar inventario', 'err');
+  }
 }
 
 function editarBolsa(id, piezasTotales, notas) {

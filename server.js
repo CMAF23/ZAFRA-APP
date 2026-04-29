@@ -326,6 +326,22 @@ async function updateBolsas(candyId, cantidadVendida, precioUnitario, source = '
     restante -= deEsta;
   }
 
+  // Tolerancia para datos reales: si la venta se registró como admin pero ya no
+  // habia stock en casa, consumir entregadas (equivale a venta de compañera mal capturada).
+  if (source === 'admin' && restante > 0) {
+    for (const b of bolsas) {
+      if (restante <= 0) break;
+      const entregadas = b.piezasEntregadas || 0;
+      if (entregadas <= 0) continue;
+      const deEsta = Math.min(restante, entregadas);
+      b.piezasEntregadas -= deEsta;
+      b.piezasVendidas += deEsta;
+      recalcBolsaFinanzas(b, precioUnitario);
+      await b.save();
+      restante -= deEsta;
+    }
+  }
+
   if (restante > 0) {
     console.warn(`⚠️ Stock insuficiente al registrar venta de ${candyId}. Faltó registrar: ${restante}`);
   }
@@ -522,6 +538,20 @@ async function reconcileBolsasFromHistory() {
         const deEsta = Math.min(restante, disponibles);
         b.piezasVendidas += deEsta;
         restante -= deEsta;
+      }
+
+      // Si ya no habia stock en casa, asumir captura admin incorrecta y consumir
+      // de entregadas para no inflar "disponibles" artificialmente.
+      if (restante > 0) {
+        for (const b of bolsas) {
+          if (restante <= 0) break;
+          const entregadas = b.piezasEntregadas || 0;
+          if (entregadas <= 0) continue;
+          const deEsta = Math.min(restante, entregadas);
+          b.piezasEntregadas -= deEsta;
+          b.piezasVendidas += deEsta;
+          restante -= deEsta;
+        }
       }
     };
 
