@@ -2033,37 +2033,30 @@ async function loadDistribuciones() {
         const rows = items.map(d => {
           const candyId = d.candyId?._id ? d.candyId._id.toString() : d.candyId?.toString?.() || d.candyId;
           const disponibles = stockPorCandy[candyId]?.disponibles ?? 0;
-          const exhausted = disponibles <= 0;
-          const low = !exhausted && disponibles <= 5;
-          const estado = exhausted
-            ? `<span class="badge-empty">Agotado</span>`
-            : low
-              ? `<span class="badge-low">Pocas piezas</span>`
-              : `<span class="badge-recovered">Disponible</span>`;
+          const low = disponibles <= 5;
+          const estado = low
+            ? `<span class="badge-low">Pocas piezas</span>`
+            : `<span class="badge-recovered">Disponible</span>`;
 
           return `
-            <tr class="${exhausted ? 'row-empty' : ''}">
-              <td style="vertical-align:top">
-                <div class="font-bold">${new Date(d.fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</div>
-                <div class="text-xs text-gray-400">${title}</div>
-              </td>
+            <tr>
               <td style="vertical-align:top">
                 <div class="font-bold text-gray-700">${d.candyId?.nombre || '—'}</div>
-                <div class="text-xs text-gray-400">${d.cantidad} piezas entregadas</div>
+                <div class="text-xs text-gray-400">${new Date(d.fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</div>
               </td>
-              <td class="font-bold text-orange-600" style="vertical-align:top; text-align:right">${money(d.subtotal)}</td>
-              <td style="vertical-align:top">
-                <input type="number" class="w-24 px-2 py-1 border rounded text-sm"
-                  value="${d.montoDevuelto}"
-                  placeholder="$0"
-                  onchange="updateDistribucionPagado('${d._id}', this.value)"/>
+              <td style="vertical-align:top; text-align:center">
+                <div class="font-bold text-blue-600">${d.cantidad}</div>
+                <div class="text-xs text-gray-400">piezas</div>
+              </td>
+              <td style="vertical-align:top; text-align:center">
+                <div class="font-bold text-green-600">${disponibles}</div>
+                <div class="text-xs text-gray-400">en stock</div>
+              </td>
+              <td style="vertical-align:top; text-align:center">
+                ${estado}
               </td>
               <td style="vertical-align:top">
-                <div class="flex flex-col gap-1">
-                  ${estado}
-                  ${exhausted ? `<button class="text-purple-500 hover:text-purple-700 font-bold" onclick="archivarDistribucion('${d._id}')" title="Archivar como agotada">📁</button>` : ''}
-                  <button class="text-red-500 hover:text-red-700 text-lg" onclick="deleteDistribucion('${d._id}')">🗑</button>
-                </div>
+                <button class="text-red-500 hover:text-red-700 text-lg" onclick="deleteDistribucion('${d._id}')" title="Eliminar">🗑</button>
               </td>
             </tr>`;
         }).join('');
@@ -2077,11 +2070,11 @@ async function loadDistribuciones() {
             <table style="width:100%; border-collapse:collapse; table-layout:fixed">
               <thead style="background:#f0f0f0; font-weight:700; text-align:left">
                 <tr style="border-bottom:2px solid #ddd">
-                  <th style="padding:10px; width:14%">Hora</th>
-                  <th style="padding:10px; width:26%">Producto</th>
-                  <th style="padding:10px; text-align:right; width:14%">Costo</th>
-                  <th style="padding:10px; width:30%">Dinero Devuelto</th>
-                  <th style="padding:10px; width:30%">Acciones</th>
+                  <th style="padding:10px; width:30%">Producto</th>
+                  <th style="padding:10px; width:15%; text-align:center">Entregadas</th>
+                  <th style="padding:10px; width:15%; text-align:center">Stock</th>
+                  <th style="padding:10px; width:20%; text-align:center">Estado</th>
+                  <th style="padding:10px; width:20%; text-align:center">Acciones</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -2095,7 +2088,7 @@ async function loadDistribuciones() {
 }
 
 async function openDistribucionModal() {
-  await loadInventario();  // Cargar inventario fresco
+  await loadInventario();
   populateDistribucionCandySelect();
   $('dist-candy-select').value = '';
   $('dist-cantidad').value = '';
