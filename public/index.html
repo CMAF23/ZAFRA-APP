@@ -2000,10 +2000,6 @@ async function loadDistribuciones() {
                   placeholder="$0"
                   onchange="updateDistribucionPagado('${d._id}', this.value)"/>
               </td>
-              <td style="vertical-align:top; text-align:center">
-                <div class="font-bold text-blue-600">${disponibles}</div>
-                <div class="text-xs text-gray-400">piezas disponibles</div>
-              </td>
               <td style="vertical-align:top">
                 <div class="flex flex-col gap-1">
                   ${estado}
@@ -2026,9 +2022,8 @@ async function loadDistribuciones() {
                   <th style="padding:10px; width:14%">Hora</th>
                   <th style="padding:10px; width:26%">Producto</th>
                   <th style="padding:10px; text-align:right; width:14%">Costo</th>
-                  <th style="padding:10px; width:16%">Dinero Devuelto</th>
-                  <th style="padding:10px; width:18%; text-align:center">Disponibles Stock</th>
-                  <th style="padding:10px; width:12%">Acciones</th>
+                  <th style="padding:10px; width:30%">Dinero Devuelto</th>
+                  <th style="padding:10px; width:30%">Acciones</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -2438,7 +2433,7 @@ function resetFiltrosAgotados() {
 
 async function deleteAgotado(id) {
   try {
-    const resp = await api(`/api/agotados/${id}`, { method: 'DELETE' });
+    const resp = await api(`/agotados/${id}`, { method: 'DELETE' });
     if (resp.ok || resp.message) {
       toast('✅ Registro eliminado', 'success');
       loadAgotados();
