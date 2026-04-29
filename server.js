@@ -386,8 +386,7 @@ async function getCompaneraStockSummary() {
     }
   }
 
-  // Distribuciones para contadores del ciclo activo
-  const allDistribuciones = await Distribucion.find().select('candyId cantidad fecha');
+  const allVentasCompanera = await Venta.find({ source: 'companera' }).select('detalles fecha');
 
   return candies.map(c => {
     const candyId = c._id.toString();
@@ -402,19 +401,21 @@ async function getCompaneraStockSummary() {
     }, 0);
 
     // Contadores display: solo del ciclo activo (desde la bolsa activa mas antigua)
-    // vendidas se calcula desde stock real entregado para evitar arrastrar ventas
-    // historicas de ciclos anteriores.
-    let totalEntregadas = 0;
+    // vendidas se toma de tickets de la companera para que cuadre con su historial real.
+    let vendidas = 0;
     const entregadasPendientes = candyBolsas.reduce((a, b) => a + (b.piezasEntregadas || 0), 0);
     if (fechaCiclo) {
-      for (const d of allDistribuciones) {
-        if (d.candyId?.toString() === candyId && d.fecha >= fechaCiclo) {
-          totalEntregadas += d.cantidad || 0;
+      for (const v of allVentasCompanera) {
+        if (v.fecha < fechaCiclo) continue;
+        for (const det of v.detalles || []) {
+          if (det.candyId?.toString() === candyId) {
+            vendidas += det.cantidadVendida || 0;
+          }
         }
       }
     }
 
-    const vendidas = Math.max(0, totalEntregadas - entregadasPendientes);
+    const totalEntregadas = vendidas + entregadasPendientes;
 
     return {
       candyId,
@@ -442,29 +443,6 @@ async function reconcileBolsasFromHistory() {
     // Esto evita que una bolsa nueva herede ventas historicas de ciclos previos.
     const fechaCiclo = bolsas[0].fechaCompra;
 
-    let totalEntregadas = 0;
-    for (const d of distribuciones) {
-      if (d.candyId?.toString() !== candyId) continue;
-      if (d.fecha < fechaCiclo) continue;
-      totalEntregadas += d.cantidad || 0;
-    }
-
-    let totalVendidasCompanera = 0;
-    let totalVendidasAdmin = 0;
-    for (const v of ventas) {
-      if (v.fecha < fechaCiclo) continue;
-      for (const det of v.detalles || []) {
-        if (det.candyId?.toString() !== candyId) continue;
-        const qty = det.cantidadVendida || 0;
-        if (qty <= 0) continue;
-        if (v.source === 'companera') totalVendidasCompanera += qty;
-        else totalVendidasAdmin += qty;
-      }
-    }
-
-    let porAsignarVendidas = totalVendidasCompanera + totalVendidasAdmin;
-    let porAsignarEntregadas = Math.max(0, totalEntregadas - totalVendidasCompanera);
-
     for (const b of bolsas) {
       b.piezasVendidas = 0;
       b.piezasEntregadas = 0;
@@ -473,20 +451,88 @@ async function reconcileBolsasFromHistory() {
       b.recuperada = false;
     }
 
-    for (const b of bolsas) {
-      if (porAsignarVendidas <= 0) break;
-      const deEsta = Math.min(porAsignarVendidas, b.piezasTotales || 0);
-      b.piezasVendidas = deEsta;
-      porAsignarVendidas -= deEsta;
+    const eventos = [];
+    for (const d of distribuciones) {
+      if (d.candyId?.toString() !== candyId) continue;
+      if (d.fecha < fechaCiclo) continue;
+      const qty = d.cantidad || 0;
+      if (qty <= 0) continue;
+      eventos.push({ tipo: 'entrega', qty, fecha: d.fecha });
+    }
+    for (const v of ventas) {
+      if (v.fecha < fechaCiclo) continue;
+      for (const det of v.detalles || []) {
+        if (det.candyId?.toString() !== candyId) continue;
+        const qty = det.cantidadVendida || 0;
+        if (qty <= 0) continue;
+        eventos.push({
+          tipo: v.source === 'companera' ? 'venta_companera' : 'venta_admin',
+          qty,
+          fecha: v.fecha,
+        });
+      }
     }
 
-    for (const b of bolsas) {
-      if (porAsignarEntregadas <= 0) break;
-      const capacidad = Math.max(0, (b.piezasTotales || 0) - (b.piezasVendidas || 0));
-      if (capacidad <= 0) continue;
-      const deEsta = Math.min(porAsignarEntregadas, capacidad);
-      b.piezasEntregadas = deEsta;
-      porAsignarEntregadas -= deEsta;
+    eventos.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+
+    const asignarEntrega = (cantidad) => {
+      let restante = cantidad;
+      for (const b of bolsas) {
+        if (restante <= 0) break;
+        const usadas = (b.piezasVendidas || 0) + (b.piezasEntregadas || 0);
+        const disponibles = Math.max(0, (b.piezasTotales || 0) - usadas);
+        if (disponibles <= 0) continue;
+        const deEsta = Math.min(restante, disponibles);
+        b.piezasEntregadas += deEsta;
+        restante -= deEsta;
+      }
+    };
+
+    const asignarVentaAdmin = (cantidad) => {
+      let restante = cantidad;
+      for (const b of bolsas) {
+        if (restante <= 0) break;
+        const usadas = (b.piezasVendidas || 0) + (b.piezasEntregadas || 0);
+        const disponibles = Math.max(0, (b.piezasTotales || 0) - usadas);
+        if (disponibles <= 0) continue;
+        const deEsta = Math.min(restante, disponibles);
+        b.piezasVendidas += deEsta;
+        restante -= deEsta;
+      }
+    };
+
+    const asignarVentaCompanera = (cantidad) => {
+      let restante = cantidad;
+
+      // Primero consumir lo que estaba entregado a la companera.
+      for (const b of bolsas) {
+        if (restante <= 0) break;
+        const entregadas = b.piezasEntregadas || 0;
+        if (entregadas <= 0) continue;
+        const deEsta = Math.min(restante, entregadas);
+        b.piezasEntregadas -= deEsta;
+        b.piezasVendidas += deEsta;
+        restante -= deEsta;
+      }
+
+      // Fallback de seguridad para datos historicos incompletos.
+      if (restante > 0) {
+        for (const b of bolsas) {
+          if (restante <= 0) break;
+          const usadas = (b.piezasVendidas || 0) + (b.piezasEntregadas || 0);
+          const disponibles = Math.max(0, (b.piezasTotales || 0) - usadas);
+          if (disponibles <= 0) continue;
+          const deEsta = Math.min(restante, disponibles);
+          b.piezasVendidas += deEsta;
+          restante -= deEsta;
+        }
+      }
+    };
+
+    for (const ev of eventos) {
+      if (ev.tipo === 'entrega') asignarEntrega(ev.qty);
+      else if (ev.tipo === 'venta_companera') asignarVentaCompanera(ev.qty);
+      else asignarVentaAdmin(ev.qty);
     }
 
     for (const b of bolsas) {
@@ -1274,6 +1320,7 @@ app.use('/api/companera', (req, res, next) => {
 app.get('/api/companera/inventario', async (req, res) => {
   try {
     const candies = await Candy.find({ activo: true }).sort('nombre');
+    const allVentasCompanera = await Venta.find({ source: 'companera' }).select('detalles fecha');
     const result = [];
 
     for (const c of candies) {
@@ -1284,21 +1331,22 @@ app.get('/api/companera/inventario', async (req, res) => {
       const disponibles = bolsasActivas.reduce((a, b) => a + (b.piezasEntregadas || 0), 0);
 
       // Para el display "Entregadas / Vendidas", usamos sólo el ciclo activo.
-      // vendidas se calcula desde stock real entregado para no mezclar ciclos viejos.
-      let totalEntregadas = 0;
+      // vendidas sale de tickets de la companera, y entregadas = vendidas + disponibles.
       let vendidas = 0;
 
       if (bolsasActivas.length > 0) {
         const fechaCiclo = bolsasActivas[0].fechaCompra; // más antigua = inicio del ciclo
-
-        const distribuciones = await Distribucion.find({
-          candyId: c._id,
-          fecha: { $gte: fechaCiclo },
-        });
-        totalEntregadas = distribuciones.reduce((a, d) => a + d.cantidad, 0);
-
-        vendidas = Math.max(0, totalEntregadas - disponibles);
+        for (const v of allVentasCompanera) {
+          if (v.fecha < fechaCiclo) continue;
+          for (const det of v.detalles || []) {
+            if (det.candyId?.toString() === c._id.toString()) {
+              vendidas += det.cantidadVendida || 0;
+            }
+          }
+        }
       }
+
+      const totalEntregadas = vendidas + disponibles;
 
       if (disponibles > 0 || totalEntregadas > 0) {
         result.push({
@@ -1687,3 +1735,15 @@ mongoose.connection.once('open', () => {
     }
   }, 500);
 });
+
+// Reconciliación periódica ligera para corregir cualquier desfase eventual.
+setInterval(async () => {
+  try {
+    const result = await reconcileBolsasFromHistory();
+    if (result?.bolsasActualizadas > 0) {
+      console.log(`♻️ Reconciliación periódica (${result.bolsasActualizadas} bolsas)`);
+    }
+  } catch (e) {
+    console.log('⚠️ Reconciliación periódica omitida:', e.message);
+  }
+}, 5 * 60 * 1000);
