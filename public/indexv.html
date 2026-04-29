@@ -53,8 +53,19 @@
     .sale-item:last-child { border-bottom: none; }
     .sale-meta { flex: 1; min-width: 0; }
     .sale-name { font-weight: 800; font-size: .92rem; color: var(--dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sale-price { font-size: .73rem; color: var(--gray); margin-top: 2px; }
-    .sale-avail { font-size: .7rem; font-weight: 700; color: var(--blue); margin-top: 1px; }
+    .sale-price {
+      display: inline-block;
+      margin-top: 5px;
+      background: linear-gradient(135deg, var(--pink), var(--orange));
+      color: #fff;
+      font-family: 'Fredoka One', cursive;
+      font-size: 1rem;
+      font-weight: 900;
+      padding: 3px 10px;
+      border-radius: 20px;
+      letter-spacing: .3px;
+    }
+    .sale-avail { font-size: .7rem; font-weight: 700; color: var(--blue); margin-top: 4px; }
     .qty-wrap { display: flex; align-items: center; gap: 7px; flex-shrink: 0; margin-left: 10px; }
     .q-btn { width: 34px; height: 34px; border-radius: 50%; border: none; font-size: 1.15rem; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform .1s; }
     .q-btn:active { transform: scale(0.88); }
@@ -89,6 +100,16 @@
     .inv-item:last-child { border-bottom: none; }
     .inv-name { font-weight: 800; font-size: .93rem; color: var(--dark); }
     .inv-sub { font-size: .73rem; color: var(--gray); margin-top: 3px; }
+    .inv-price-badge {
+      display: inline-block;
+      margin-top: 5px;
+      background: linear-gradient(135deg, #FF4F81, #FF7849);
+      color: #fff;
+      font-family: 'Fredoka One', cursive;
+      font-size: .95rem;
+      padding: 2px 10px;
+      border-radius: 20px;
+    }
     .stock-badge { font-family: 'Fredoka One', cursive; font-size: 1.35rem; line-height: 1; text-align: center; min-width: 54px; }
     .stock-badge .lbl { font-family: 'Nunito', sans-serif; font-size: .6rem; color: var(--gray); font-weight: 700; text-transform: uppercase; }
     .ok   { color: var(--green); }
@@ -490,7 +511,8 @@ async function loadInventario(){
       return `<div class="inv-item">
         <div>
           <div class="inv-name">${c.nombre}</div>
-          <div class="inv-sub">${mxn(c.precioUnitario)} c/u &nbsp;·&nbsp; Entregadas: ${c.totalEntregadas} &nbsp;·&nbsp; Vendidas: ${c.vendidas}</div>
+          <div class="inv-price-badge">💰 ${mxn(c.precioUnitario)} c/u</div>
+          <div class="inv-sub" style="margin-top:4px">Entregadas: ${c.totalEntregadas} &nbsp;·&nbsp; Vendidas: ${c.vendidas}</div>
         </div>
         <div class="stock-badge">
           <div class="${cls}">${c.disponibles}</div>
