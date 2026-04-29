@@ -350,36 +350,59 @@ function addToMap(map, key, value) {
 
 async function getCompaneraStockSummary() {
   const candies = await Candy.find({ activo: true }).sort('nombre').select('_id nombre precioUnitario');
-  const bolsas = await Bolsa.find({ activa: true }).select('candyId piezasTotales piezasVendidas piezasEntregadas');
-  const distribuciones = await Distribucion.find().select('candyId cantidad');
-  const ventas = await Venta.find({ source: 'companera' }).select('detalles');
 
-  // Calcula disponibles basado en bolsas de inventario
-  const disponiblesPorCandy = {};
-  for (const b of bolsas) {
-    const candyIdStr = b.candyId?.toString();
-    const usadas = (b.piezasVendidas || 0) + (b.piezasEntregadas || 0);
-    const disponibles = Math.max(0, (b.piezasTotales || 0) - usadas);
-    addToMap(disponiblesPorCandy, candyIdStr, disponibles);
-  }
+  // FIX: usar piezasEntregadas de bolsas activas como fuente de verdad para disponibles.
+  // El calculo anterior (totalEntregadas - vendidas sobre toda la historia) fallaba cuando
+  // se archivaba una bolsa vieja: las ventas historicas de la companera seguian en la DB
+  // pero la distribucion vieja ya no, dando disponibles = 0 para la bolsa nueva.
+  const todasLasBolsasActivas = await Bolsa.find({ activa: true })
+    .select('candyId piezasTotales piezasVendidas piezasEntregadas fechaCompra')
+    .sort('fechaCompra');
 
-  const entregadasPorCandy = {};
-  for (const d of distribuciones) {
-    addToMap(entregadasPorCandy, d.candyId?.toString(), d.cantidad || 0);
-  }
-
-  const vendidasPorCandy = {};
-  for (const v of ventas) {
-    for (const det of v.detalles || []) {
-      addToMap(vendidasPorCandy, det.candyId?.toString(), det.cantidadVendida || 0);
+  // Agrupar bolsas activas y fecha minima de ciclo por candy
+  const bolsasPorCandy = {};
+  const fechaCicloPorCandy = {};
+  for (const b of todasLasBolsasActivas) {
+    const key = b.candyId?.toString();
+    if (!key) continue;
+    if (!bolsasPorCandy[key]) bolsasPorCandy[key] = [];
+    bolsasPorCandy[key].push(b);
+    if (!fechaCicloPorCandy[key] || b.fechaCompra < fechaCicloPorCandy[key]) {
+      fechaCicloPorCandy[key] = b.fechaCompra;
     }
   }
 
+  // Distribuciones y ventas para contadores del ciclo activo
+  const allDistribuciones = await Distribucion.find().select('candyId cantidad fecha');
+  const allVentasCompanera = await Venta.find({ source: 'companera' }).select('detalles fecha');
+
   return candies.map(c => {
     const candyId = c._id.toString();
-    const totalEntregadas = entregadasPorCandy[candyId] || 0;
-    const vendidas = vendidasPorCandy[candyId] || 0;
-    const disponibles = disponiblesPorCandy[candyId] || 0;
+    const candyBolsas = bolsasPorCandy[candyId] || [];
+    const fechaCiclo = fechaCicloPorCandy[candyId] || null;
+
+    // disponibles = piezas que tiene la companera sin vender (FIFO truth)
+    const disponibles = candyBolsas.reduce((a, b) => a + (b.piezasEntregadas || 0), 0);
+
+    // Contadores display: solo del ciclo activo (desde la bolsa activa mas antigua)
+    let totalEntregadas = 0;
+    let vendidas = 0;
+    if (fechaCiclo) {
+      for (const d of allDistribuciones) {
+        if (d.candyId?.toString() === candyId && d.fecha >= fechaCiclo) {
+          totalEntregadas += d.cantidad || 0;
+        }
+      }
+      for (const v of allVentasCompanera) {
+        if (v.fecha < fechaCiclo) continue;
+        for (const det of v.detalles || []) {
+          if (det.candyId?.toString() === candyId) {
+            vendidas += det.cantidadVendida || 0;
+          }
+        }
+      }
+    }
+
     return {
       candyId,
       nombre: c.nombre,
@@ -617,37 +640,6 @@ app.delete('/api/bolsas/:id', async (req, res) => {
   try {
     await Bolsa.findByIdAndUpdate(req.params.id, { activa: false });
     res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-// PATCH /api/bolsas/:id  — corrige piezasTotales y/o notas de una bolsa
-app.patch('/api/bolsas/:id', async (req, res) => {
-  try {
-    const bolsa = await Bolsa.findById(req.params.id).populate('candyId');
-    if (!bolsa) return res.status(404).json({ error: 'Bolsa no encontrada' });
-
-    const { piezasTotales, notas } = req.body;
-
-    if (piezasTotales !== undefined) {
-      const nuevasPiezas = parseInt(piezasTotales, 10);
-      if (isNaN(nuevasPiezas) || nuevasPiezas < 1)
-        return res.status(400).json({ error: 'piezasTotales debe ser un número positivo' });
-      const usadas = (bolsa.piezasVendidas || 0) + (bolsa.piezasEntregadas || 0);
-      if (nuevasPiezas < usadas)
-        return res.status(400).json({ error: `No puedes poner menos piezas que las ya usadas (${usadas})` });
-      bolsa.piezasTotales = nuevasPiezas;
-    }
-
-    if (notas !== undefined) bolsa.notas = notas;
-
-    // Recalcular finanzas si cambió piezasTotales
-    if (bolsa.candyId?.precioUnitario != null) {
-      recalcBolsaFinanzas(bolsa, bolsa.candyId.precioUnitario);
-    }
-
-    await bolsa.save();
-    await bolsa.populate('candyId');
-    res.json(bolsa);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1223,32 +1215,50 @@ app.get('/api/companera/inventario', async (req, res) => {
     const result = [];
 
     for (const c of candies) {
-      const distribuciones = await Distribucion.find({ candyId: c._id });
-      const totalEntregadas = distribuciones.reduce((a, d) => a + d.cantidad, 0);
+      // ✅ FIX: usar piezasEntregadas de bolsas ACTIVAS como fuente de verdad.
+      // Esto evita que ventas históricas de ciclos anteriores descuenten el
+      // inventario nuevo cuando se crea una bolsa nueva para el mismo dulce.
+      const bolsasActivas = await Bolsa.find({ candyId: c._id, activa: true }).sort('fechaCompra');
+      const disponibles = bolsasActivas.reduce((a, b) => a + (b.piezasEntregadas || 0), 0);
 
-      const ventas = await Venta.find({
-        source: 'companera',
-        'detalles.candyId': c._id,
-      });
+      // Para el display "Entregadas / Vendidas", usamos sólo el ciclo activo:
+      // contamos distribuciones y ventas desde la fecha de la bolsa activa más antigua.
+      let totalEntregadas = 0;
       let vendidas = 0;
-      for (const v of ventas) {
-        const det = v.detalles.find(d => d.candyId?.toString() === c._id.toString());
-        if (det) vendidas += det.cantidadVendida;
+
+      if (bolsasActivas.length > 0) {
+        const fechaCiclo = bolsasActivas[0].fechaCompra; // más antigua = inicio del ciclo
+
+        const distribuciones = await Distribucion.find({
+          candyId: c._id,
+          fecha: { $gte: fechaCiclo },
+        });
+        totalEntregadas = distribuciones.reduce((a, d) => a + d.cantidad, 0);
+
+        const ventas = await Venta.find({
+          source: 'companera',
+          'detalles.candyId': c._id,
+          fecha: { $gte: fechaCiclo },
+        });
+        for (const v of ventas) {
+          const det = v.detalles.find(d => d.candyId?.toString() === c._id.toString());
+          if (det) vendidas += det.cantidadVendida;
+        }
       }
 
-      const disponibles = Math.max(0, totalEntregadas - vendidas);
-
-      result.push({
-        _id: c._id,
-        nombre: c.nombre,
-        precioUnitario: c.precioUnitario,
-        totalEntregadas,
-        vendidas,
-        disponibles,
-      });
+      if (disponibles > 0 || totalEntregadas > 0) {
+        result.push({
+          _id: c._id,
+          nombre: c.nombre,
+          precioUnitario: c.precioUnitario,
+          totalEntregadas,
+          vendidas,
+          disponibles,
+        });
+      }
     }
 
-    res.json(result.filter(r => r.totalEntregadas > 0));
+    res.json(result);
   } catch (e) {
     console.error('GET /api/companera/inventario:', e);
     res.status(500).json({ error: e.message });
