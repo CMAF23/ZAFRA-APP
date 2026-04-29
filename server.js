@@ -138,6 +138,8 @@ const candySchema = new mongoose.Schema({
   piezasPorBolsa: { type: Number, required: true, min: 1 },
   costoPorBolsa:  { type: Number, required: true, min: 0 },
   precioUnitario: { type: Number, required: true, min: 0 },
+  commissionRate: { type: Number, default: 0.12, min: 0, max: 1 },
+  origen:         String,
   activo:         { type: Boolean, default: true },
 }, { timestamps: true });
 const Candy = mongoose.model('Candy', candySchema);
@@ -169,6 +171,8 @@ const detalleSchema = new mongoose.Schema({
   cantidadVendida:{ type: Number, default: 0 },
   precioUnitario: Number,
   subtotal:       Number,
+  commissionRate: Number,
+  comisionCalculada: Number,
 });
 
 /** Registro de ventas de un día */
@@ -273,6 +277,16 @@ function recalcBolsaFinanzas(bolsa, precioUnitario) {
   bolsa.dineroRecuperado = parseFloat((bolsa.piezasVendidas * precioUnitario).toFixed(2));
   bolsa.gananciaAcumulada = parseFloat((bolsa.dineroRecuperado - bolsa.costoTotal).toFixed(2));
   bolsa.recuperada = bolsa.dineroRecuperado >= bolsa.costoTotal;
+}
+
+function getCommissionRate(candy) {
+  const rate = Number(candy?.commissionRate);
+  if (!Number.isFinite(rate) || rate < 0) return 0.12;
+  return Math.min(rate, 1);
+}
+
+function calcDetalleComision(subtotal, candy) {
+  return parseFloat((subtotal * getCommissionRate(candy)).toFixed(2));
 }
 
 /**
@@ -525,6 +539,9 @@ app.post('/api/seed', async (req, res) => {
       { nombre: 'Kiubo Re mix',             piezasPorBolsa: 10, costoPorBolsa: 47,   precioUnitario: 8.5 },
       { nombre: 'Pulparindos',              piezasPorBolsa: 20, costoPorBolsa: 43.5, precioUnitario: 4.5 },
       { nombre: 'papas chidas Salsa negra', piezasPorBolsa: 5,  costoPorBolsa: 74,   precioUnitario: 27  },
+      { nombre: 'Manguitos ENCH Tamarindo',  piezasPorBolsa: 6,  costoPorBolsa: +(86 * (6 / 18)).toFixed(2),  precioUnitario: 16, commissionRate: 0, origen: 'Bolsa 1kg MANGOMITAS' },
+      { nombre: 'Manguitos ENCH Chamoy',     piezasPorBolsa: 4,  costoPorBolsa: +(86 * (4 / 18)).toFixed(2),  precioUnitario: 15, commissionRate: 0, origen: 'Bolsa 1kg MANGOMITAS' },
+      { nombre: 'Manguitos Solos',           piezasPorBolsa: 8,  costoPorBolsa: +(86 * (8 / 18)).toFixed(2),  precioUnitario: 13, commissionRate: 0, origen: 'Bolsa 1kg MANGOMITAS' },
     ];
 
     let insertados = 0;
@@ -734,6 +751,8 @@ app.post('/api/ventas', async (req, res) => {
       const candy = await Candy.findById(d.candyId);
       if (!candy) continue;
       const subtotal = +d.cantidadVendida * candy.precioUnitario;
+      const commissionRate = getCommissionRate(candy);
+      const comisionCalculada = calcDetalleComision(subtotal, candy);
       totalEsperado += subtotal;
       detallesOk.push({
         candyId:         candy._id,
@@ -741,13 +760,15 @@ app.post('/api/ventas', async (req, res) => {
         cantidadVendida: +d.cantidadVendida,
         precioUnitario:  candy.precioUnitario,
         subtotal,
+        commissionRate,
+        comisionCalculada,
       });
     }
 
     if (totalEsperado === 0) return res.status(400).json({ error: 'No hay dulces para registrar' });
 
     const diferencia         = parseFloat((totalRecibido - totalEsperado).toFixed(2));
-    const comisionCalculada  = parseFloat((totalEsperado * 0.12).toFixed(2));
+    const comisionCalculada  = parseFloat(detallesOk.reduce((acc, d) => acc + (d.comisionCalculada || 0), 0).toFixed(2));
 
     const ventaData = {
       fecha: ahora,
@@ -823,12 +844,8 @@ app.delete('/api/ventas/:id', async (req, res) => {
     const venta = await Venta.findById(req.params.id);
     if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
 
-    // 1. Revertir piezasVendidas en bolsas (FIFO inverso)
     for (const d of venta.detalles) {
       if (!d.cantidadVendida || d.cantidadVendida <= 0) continue;
-      const candy = await Candy.findById(d.candyId);
-      if (!candy) continue;
-
       const bolsas = await Bolsa.find({
         candyId: d.candyId,
         activa: true,
@@ -839,29 +856,19 @@ app.delete('/api/ventas/:id', async (req, res) => {
       for (const b of bolsas) {
         if (restante <= 0) break;
         const devolver = Math.min(restante, b.piezasVendidas);
-        b.piezasVendidas   -= devolver;
-        b.dineroRecuperado  = parseFloat((b.piezasVendidas * d.precioUnitario).toFixed(2));
-        b.gananciaAcumulada = b.piezasVendidas > 0
-          ? parseFloat((b.dineroRecuperado - b.costoTotal).toFixed(2))
-          : 0;
-        b.recuperada        = b.dineroRecuperado >= b.costoTotal;
+        b.piezasVendidas -= devolver;
+        recalcBolsaFinanzas(b, d.precioUnitario);
         await b.save();
         restante -= devolver;
       }
     }
 
-    // 2. Revertir totales de la semana
     if (venta.semanaId) {
       await Semana.findByIdAndUpdate(venta.semanaId, {
-        $inc: {
-          totalVentas:   -venta.totalEsperado,
-          totalComision: -venta.comisionCalculada,
-          numeroDias:    -1,
-        },
+        $inc: { totalVentas: -venta.totalEsperado, totalComision: -venta.comisionCalculada, numeroDias: -1 },
       });
     }
 
-    // 3. Eliminar la venta
     await Venta.findByIdAndDelete(req.params.id);
 
     res.json({ ok: true, msg: 'Venta eliminada y stock restaurado' });
@@ -923,7 +930,7 @@ app.post('/api/distribuciones', async (req, res) => {
     const semana = await getOrCreateCurrentWeek();
     const precioUnitario = candy.precioUnitario;
     const subtotal = parseFloat((cantidad * precioUnitario).toFixed(2));
-    const gananciasEsperada = parseFloat((subtotal * 0.12).toFixed(2));  // 12%
+    const gananciasEsperada = calcDetalleComision(subtotal, candy);
 
     const distribucion = await Distribucion.create({
       fecha: new Date(),
@@ -1011,7 +1018,8 @@ app.put('/api/distribuciones/:id', async (req, res) => {
       await addDistribution(previa.candyId, extra);
       nuevaCantidad = previa.cantidad + extra;
       nuevoSubtotal = parseFloat((nuevaCantidad * previa.precioUnitario).toFixed(2));
-      nuevasGanancias = parseFloat((nuevoSubtotal * 0.12).toFixed(2));
+      const candy = await Candy.findById(previa.candyId);
+      nuevasGanancias = calcDetalleComision(nuevoSubtotal, candy);
     }
 
     const distribucion = await Distribucion.findByIdAndUpdate(
@@ -1335,6 +1343,8 @@ app.post('/api/companera/venta', async (req, res) => {
       const candy = await Candy.findById(d.candyId);
       if (!candy) continue;
       const subtotal = +d.cantidadVendida * candy.precioUnitario;
+      const commissionRate = getCommissionRate(candy);
+      const comisionCalculada = calcDetalleComision(subtotal, candy);
       totalEsperado += subtotal;
       detallesOk.push({
         candyId:         candy._id,
@@ -1342,13 +1352,15 @@ app.post('/api/companera/venta', async (req, res) => {
         cantidadVendida: +d.cantidadVendida,
         precioUnitario:  candy.precioUnitario,
         subtotal,
+        commissionRate,
+        comisionCalculada,
       });
     }
 
     if (totalEsperado === 0) return res.status(400).json({ error: 'No hay dulces para registrar' });
 
     const diferencia        = parseFloat((+totalRecibido - totalEsperado).toFixed(2));
-    const comisionCalculada = parseFloat((totalEsperado * 0.12).toFixed(2));
+    const comisionCalculada = parseFloat(detallesOk.reduce((acc, d) => acc + (d.comisionCalculada || 0), 0).toFixed(2));
 
     const ventaCompaneraData = {
       fecha: ahora,
