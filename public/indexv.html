@@ -342,7 +342,17 @@ async function api(path,opts={}){
     ...opts,
     body:opts.body?JSON.stringify(opts.body):undefined,
   });
-  const data=await res.json();
+  const contentType = res.headers.get('content-type') || '';
+  let data = null;
+  if (contentType.includes('application/json')) {
+    data = await res.json();
+  } else {
+    if (res.status === 401) {
+      localStorage.removeItem('companeraApiKey');
+      throw new Error('Clave inválida. Recarga la página e intenta otra vez.');
+    }
+    throw new Error(`Error ${res.status}: respuesta no JSON`);
+  }
   if(!res.ok){
     if (res.status === 401) {
       localStorage.removeItem('companeraApiKey');

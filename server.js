@@ -386,9 +386,8 @@ async function getCompaneraStockSummary() {
     }
   }
 
-  // Distribuciones y ventas para contadores del ciclo activo
+  // Distribuciones para contadores del ciclo activo
   const allDistribuciones = await Distribucion.find().select('candyId cantidad fecha');
-  const allVentasCompanera = await Venta.find({ source: 'companera' }).select('detalles fecha');
 
   return candies.map(c => {
     const candyId = c._id.toString();
@@ -403,23 +402,19 @@ async function getCompaneraStockSummary() {
     }, 0);
 
     // Contadores display: solo del ciclo activo (desde la bolsa activa mas antigua)
+    // vendidas se calcula desde stock real entregado para evitar arrastrar ventas
+    // historicas de ciclos anteriores.
     let totalEntregadas = 0;
-    let vendidas = 0;
+    const entregadasPendientes = candyBolsas.reduce((a, b) => a + (b.piezasEntregadas || 0), 0);
     if (fechaCiclo) {
       for (const d of allDistribuciones) {
         if (d.candyId?.toString() === candyId && d.fecha >= fechaCiclo) {
           totalEntregadas += d.cantidad || 0;
         }
       }
-      for (const v of allVentasCompanera) {
-        if (v.fecha < fechaCiclo) continue;
-        for (const det of v.detalles || []) {
-          if (det.candyId?.toString() === candyId) {
-            vendidas += det.cantidadVendida || 0;
-          }
-        }
-      }
     }
+
+    const vendidas = Math.max(0, totalEntregadas - entregadasPendientes);
 
     return {
       candyId,
@@ -1057,6 +1052,7 @@ app.post('/api/bolsas/migrate', async (req, res) => {
   try {
     const bolsas = await Bolsa.find({ dineroRecuperado: 0, piezasVendidas: { $gt: 0 } });
     let corregidas = 0;
+    for (const b of bolsas) {
       b.piezasEntregadas = (b.piezasEntregadas || 0) + b.piezasVendidas;
       b.piezasVendidas = 0;
       await b.save();
@@ -1284,8 +1280,8 @@ app.get('/api/companera/inventario', async (req, res) => {
       const bolsasActivas = await Bolsa.find({ candyId: c._id, activa: true }).sort('fechaCompra');
       const disponibles = bolsasActivas.reduce((a, b) => a + (b.piezasEntregadas || 0), 0);
 
-      // Para el display "Entregadas / Vendidas", usamos sólo el ciclo activo:
-      // contamos distribuciones y ventas desde la fecha de la bolsa activa más antigua.
+      // Para el display "Entregadas / Vendidas", usamos sólo el ciclo activo.
+      // vendidas se calcula desde stock real entregado para no mezclar ciclos viejos.
       let totalEntregadas = 0;
       let vendidas = 0;
 
@@ -1298,15 +1294,7 @@ app.get('/api/companera/inventario', async (req, res) => {
         });
         totalEntregadas = distribuciones.reduce((a, d) => a + d.cantidad, 0);
 
-        const ventas = await Venta.find({
-          source: 'companera',
-          'detalles.candyId': c._id,
-          fecha: { $gte: fechaCiclo },
-        });
-        for (const v of ventas) {
-          const det = v.detalles.find(d => d.candyId?.toString() === c._id.toString());
-          if (det) vendidas += det.cantidadVendida;
-        }
+        vendidas = Math.max(0, totalEntregadas - disponibles);
       }
 
       if (disponibles > 0 || totalEntregadas > 0) {

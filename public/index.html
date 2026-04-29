@@ -905,7 +905,19 @@ async function api(path, opts = {}) {
       method:  opts.method  || (opts.body ? 'POST' : 'GET'),
       body:    opts.body    ? JSON.stringify(opts.body) : undefined,
     });
-    const data = await res.json();
+    const contentType = res.headers.get('content-type') || '';
+    let data = null;
+
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const raw = await res.text();
+      if (!res.ok) {
+        throw new Error(`Error ${res.status}: respuesta no JSON`);
+      }
+      throw new Error('Respuesta inesperada del servidor (no JSON)');
+    }
+
     if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
     return data;
   } catch (e) {
@@ -1714,7 +1726,7 @@ async function guardarEdicionBolsa() {
     toast('Número de piezas inválido', true); return;
   }
   try {
-    await api('/bolsas/' + id, { method: 'PATCH', body: { piezasTotales, notas } });
+    await api('/bolsas/' + id, { method: 'PUT', body: { piezasTotales, notas } });
     toast('✅ Bolsa corregida');
     closeModal('modal-editar-bolsa');
     loadInventario();
