@@ -362,6 +362,25 @@ function addToMap(map, key, value) {
   map[key] = (map[key] || 0) + value;
 }
 
+function normalizeBolsaCounters(bolsa) {
+  bolsa.piezasVendidas = Math.max(0, Number(bolsa.piezasVendidas || 0));
+  bolsa.piezasEntregadas = Math.max(0, Number(bolsa.piezasEntregadas || 0));
+
+  const total = Math.max(0, Number(bolsa.piezasTotales || 0));
+  let usadas = bolsa.piezasVendidas + bolsa.piezasEntregadas;
+  if (usadas <= total) return;
+
+  // Priorizar conservar vendidas; recortar entregadas primero.
+  const exceso = usadas - total;
+  const recorteEntregadas = Math.min(exceso, bolsa.piezasEntregadas);
+  bolsa.piezasEntregadas -= recorteEntregadas;
+  usadas = bolsa.piezasVendidas + bolsa.piezasEntregadas;
+
+  if (usadas > total) {
+    bolsa.piezasVendidas = Math.max(0, total - bolsa.piezasEntregadas);
+  }
+}
+
 async function getCompaneraStockSummary() {
   const candies = await Candy.find({ activo: true }).sort('nombre').select('_id nombre precioUnitario');
 
@@ -473,7 +492,12 @@ async function reconcileBolsasFromHistory() {
       }
     }
 
-    eventos.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+    const priority = { entrega: 0, venta_companera: 1, venta_admin: 2 };
+    eventos.sort((a, b) => {
+      const diff = new Date(a.fecha) - new Date(b.fecha);
+      if (diff !== 0) return diff;
+      return (priority[a.tipo] ?? 99) - (priority[b.tipo] ?? 99);
+    });
 
     const asignarEntrega = (cantidad) => {
       let restante = cantidad;
@@ -536,6 +560,7 @@ async function reconcileBolsasFromHistory() {
     }
 
     for (const b of bolsas) {
+      normalizeBolsaCounters(b);
       recalcBolsaFinanzas(b, candy.precioUnitario || 0);
       await b.save();
       bolsasActualizadas += 1;

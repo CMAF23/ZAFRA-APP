@@ -2269,6 +2269,7 @@ async function loadDistribuciones() {
         const rows = items.map(d => {
           const candyId = d.candyId?._id ? d.candyId._id.toString() : d.candyId?.toString?.() || d.candyId;
           const disponibles = stockPorCandy[candyId]?.disponibles ?? 0;
+          const vendidas = stockPorCandy[candyId]?.vendidas ?? 0;
           const low = disponibles <= 5;
           const estado = low
             ? `<span class="badge-low">Pocas piezas</span>`
@@ -2283,6 +2284,10 @@ async function loadDistribuciones() {
               <td style="vertical-align:top; text-align:center">
                 <div class="font-bold text-blue-600">${d.cantidad}</div>
                 <div class="text-xs text-gray-400">piezas</div>
+              </td>
+              <td style="vertical-align:top; text-align:center">
+                <div class="font-bold text-purple-600">${vendidas}</div>
+                <div class="text-xs text-gray-400">vendidas</div>
               </td>
               <td style="vertical-align:top; text-align:center">
                 <div class="font-bold text-green-600">${disponibles}</div>
@@ -2306,11 +2311,12 @@ async function loadDistribuciones() {
             <table style="width:100%; border-collapse:collapse; table-layout:fixed">
               <thead style="background:#f0f0f0; font-weight:700; text-align:left">
                 <tr style="border-bottom:2px solid #ddd">
-                  <th style="padding:10px; width:30%">Producto</th>
-                  <th style="padding:10px; width:15%; text-align:center">Entregadas</th>
-                  <th style="padding:10px; width:15%; text-align:center">Stock</th>
-                  <th style="padding:10px; width:20%; text-align:center">Estado</th>
-                  <th style="padding:10px; width:20%; text-align:center">Acciones</th>
+                  <th style="padding:10px; width:27%">Producto</th>
+                  <th style="padding:10px; width:14%; text-align:center">Entregadas</th>
+                  <th style="padding:10px; width:14%; text-align:center">Vendidas</th>
+                  <th style="padding:10px; width:14%; text-align:center">Stock</th>
+                  <th style="padding:10px; width:16%; text-align:center">Estado</th>
+                  <th style="padding:10px; width:15%; text-align:center">Acciones</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
