@@ -873,49 +873,16 @@ app.delete('/api/distribuciones/:id', async (req, res) => {
 
 app.put('/api/distribuciones/:id', async (req, res) => {
   try {
-    const { montoDevuelto, notas, cantidadExtra } = req.body;
+    const { montoDevuelto, notas } = req.body;
     const previa = await Distribucion.findById(req.params.id);
     if (!previa) return res.status(404).json({ error: 'No encn ontrada' });
-
-    let nuevaCantidad = previa.cantidad;
-    let nuevoSubtotal = previa.subtotal;
-    let nuevasGanancias = previa.gananciasEsperada;
-
-    if (cantidadExtra !== undefined && cantidadExtra !== null && cantidadExtra !== '') {
-      const extra = Math.trunc(Number(cantidadExtra));
-      if (!Number.isFinite(extra) || extra <= 0) {
-        return res.status(400).json({ error: 'La cantidad extra debe ser mayor a 0' });
-      }
-
-      const bolsaStats = await Bolsa.find({
-        candyId: previa.candyId,
-        activa: true,
-      });
-
-      const disponibles = bolsaStats.reduce((sum, b) => {
-        const usadas = (b.piezasVendidas || 0) + (b.piezasEntregadas || 0);
-        return sum + Math.max(0, (b.piezasTotales || 0) - usadas);
-      }, 0);
-
-      if (extra > disponibles) {
-        return res.status(400).json({ error: `Solo hay ${disponibles} piezas disponibles para agregar` });
-      }
-
-      await addDistribution(previa.candyId, extra);
-      nuevaCantidad = previa.cantidad + extra;
-      nuevoSubtotal = parseFloat((nuevaCantidad * previa.precioUnitario).toFixed(2));
-      nuevasGanancias = parseFloat((nuevoSubtotal * 0.12).toFixed(2));
-    }
 
     const distribucion = await Distribucion.findByIdAndUpdate(
       req.params.id,
       {
-        cantidad: nuevaCantidad,
-        subtotal: nuevoSubtotal,
-        gananciasEsperada: nuevasGanancias,
         montoDevuelto: +montoDevuelto,
         notas,
-        pagado: +montoDevuelto >= nuevasGanancias,
+        pagado: +montoDevuelto >= previa.gananciasEsperada,
       },
       { new: true }
     );
