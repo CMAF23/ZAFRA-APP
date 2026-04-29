@@ -84,6 +84,7 @@
   .venta-pay { display:inline-flex; align-items:center; gap:4px; font-size:.7rem; font-weight:800; padding:3px 9px; border-radius:999px; }
   .venta-pay.cash { background:#D1FAE5; color:#065F46; }
   .venta-pay.transfer { background:#DBEAFE; color:#1D4ED8; }
+  .venta-pay.credit { background:#FED7AA; color:#B45309; }
 
   /* Diff positive/negative */
   .diff-pos { color: var(--green); font-weight: 800; }
@@ -322,7 +323,20 @@
             <div class="fredoka text-3xl" id="total-esperado" style="color:var(--orange)">$0.00</div>
           </div>
           <hr class="mb-3"/>
+          
+          <!-- Payment Method Selection -->
           <div class="mb-3">
+            <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Forma de Pago</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <button id="pay-efectivo" class="btn btn-sm" style="background:#22C55E;color:#fff;border:none;cursor:pointer;border-radius:8px;font-weight:700" onclick="selectPaymentMethod('efectivo')">💵 Efectivo</button>
+              <button id="pay-transferencia" class="btn btn-sm" style="background:#3B82F6;color:#fff;border:none;cursor:pointer;border-radius:8px;font-weight:700" onclick="selectPaymentMethod('transferencia')">🏦 Transferencia</button>
+              <button id="pay-fiado" class="btn btn-sm" colspan="2" style="background:#F59E0B;color:#fff;border:none;cursor:pointer;border-radius:8px;font-weight:700;grid-column:1/-1" onclick="selectPaymentMethod('fiado')">📋 Fiado</button>
+            </div>
+          </div>
+          <hr class="mb-3"/>
+
+          <!-- Dinero Recibido o Nombre Deudor -->
+          <div class="mb-3" id="pago-section">
             <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Dinero Recibido</div>
             <div id="rec-input-wrap">
               <input id="received-input" type="number" step="0.01" min="0" placeholder="0.00"
@@ -1087,13 +1101,31 @@ async function saveSale() {
 
   if (!detalles.length) { toast('Ingresa al menos 1 dulce vendido', 'err'); return; }
 
-  const totalRecibido = parseFloat($('received-input').value);
-  if (isNaN(totalRecibido) || totalRecibido < 0) { toast('Ingresa el dinero recibido', 'err'); return; }
+  // Validar método de pago
+  const paymentMethod = S.currentPaymentMethod || 'efectivo';
+  
+  let totalRecibido = parseFloat($('received-input').value || 0);
+  
+  if (paymentMethod === 'fiado') {
+    const nombreDeudor = ($('deudor-nombre').value || '').trim();
+    if (!nombreDeudor) { toast('Ingresa el nombre del deudor', 'err'); return; }
+    totalRecibido = 0;  // Para fiado, totalRecibido es 0 inicialmente
+  } else {
+    if (isNaN(totalRecibido) || totalRecibido < 0) { toast('Ingresa el dinero recibido', 'err'); return; }
+  }
 
   try {
-    const venta = await api('/ventas', {
-      body: { detalles, totalRecibido, notas: $('venta-notas').value }
-    });
+    const body = { 
+      detalles, 
+      totalRecibido, 
+      notas: $('venta-notas').value,
+      paymentMethod
+    };
+    if (paymentMethod === 'fiado') {
+      body.nombreDeudor = $('deudor-nombre').value.trim();
+    }
+    
+    const venta = await api('/ventas', { body });
     toast('Venta registrada correctamente');
     S.ventaHoy = venta;
     clearSaleForm();
@@ -1106,6 +1138,7 @@ function clearSaleForm() {
   S.candies.forEach(c => { const el = $('qty-'+c._id); if(el) el.value = 0; });
   $('received-input').value = '';
   $('venta-notas').value = '';
+  selectPaymentMethod('efectivo');  // Reset a efectivo
   calcTotals();
 }
 
@@ -1116,18 +1149,49 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
   const recibidoTxt = estaPagada ? `$${gananciaNeta}` : money(v.totalRecibido);
   const diferenciaTxt = estaPagada ? money(0) : `${v.diferencia>=0?'+':''}${money(v.diferencia)}`;
 
+  // Payment method display
+  let paymentDisplay = 'Efectivo';
+  let paymentColor = 'cash';
+  if (v.paymentMethod === 'transferencia') {
+    paymentDisplay = 'Transferencia';
+    paymentColor = 'transfer';
+  } else if (v.paymentMethod === 'fiado') {
+    paymentDisplay = `Fiado - ${v.nombreDeudor || '?'}`;
+    paymentColor = 'credit';
+  }
+  
+  // Estado de pago (con lógica para fiados)
+  let statusBadge = '';
+  let showMarkPaidBtn = false;
+  if (v.paymentMethod === 'fiado') {
+    if (v.pagado) {
+      statusBadge = `<span class="badge-recovered text-xs">✅ Pagado</span>`;
+    } else if (v.pagadoPorVendedora) {
+      statusBadge = `<span style="background:#F3E8FF;color:#6D28D9;font-size:.75rem;font-weight:700;padding:2px 10px;border-radius:999px;">💜 Pagado a Vendedora</span>`;
+      showMarkPaidBtn = true;
+    } else {
+      statusBadge = `<span class="badge-empty text-xs">⏳ Pendiente</span>`;
+      showMarkPaidBtn = true;
+    }
+  } else {
+    if (estaPagada) {
+      statusBadge = `<span class="badge-recovered text-xs">✅ Pagada</span>`;
+    } else {
+      statusBadge = `<span class="badge-empty text-xs">⏳ Pendiente</span>`;
+      showMarkPaidBtn = true;
+    }
+  }
+
   return `
   <div class="card mb-2" style="background:#F9FAFB; border-left:3px solid var(--orange)">
     <div class="flex justify-between items-start mb-2">
       <span class="text-sm font-bold text-gray-500">⏰ ${fechaTxt}</span>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
         <span class="badge-pending text-xs">Venta #${v._id.slice(-4)}</span>
-        <span class="venta-pay ${(v.paymentMethod || 'efectivo') === 'transferencia' ? 'transfer' : 'cash'}">
-          Pago: ${(v.paymentMethod || 'efectivo') === 'transferencia' ? 'Transferencia' : 'Efectivo'}
+        <span class="venta-pay ${paymentColor}">
+          Pago: ${paymentDisplay}
         </span>
-        ${estaPagada
-          ? `<span class="badge-recovered text-xs">✅ Pagada</span>`
-          : `<span class="badge-empty text-xs">⏳ Pendiente</span>`}
+        ${statusBadge}
       </div>
     </div>
     <div class="flex flex-wrap gap-2 mb-3">
@@ -1156,9 +1220,9 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
     </div>
     ${v.notas ? `<div class="text-xs text-gray-400 mt-1">📝 ${v.notas}</div>` : ''}
     <div class="mt-3" style="display:flex;gap:8px;flex-wrap:wrap">
-      ${!estaPagada ? `
+      ${showMarkPaidBtn ? `
       <button onclick="markVentaPagada('${v._id}')" style="background:#22C55E;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
-        ✅ Marcar pagada
+        ${v.pagadoPorVendedora ? '✅ Confirmar Pagado' : '✅ Marcar pagada'}
       </button>` : ''}
       <button onclick="ticketCompanera('${v._id}')" style="background:#f0a000;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
         🧾 Ticket
@@ -1269,14 +1333,47 @@ async function deleteVenta(id) {
 }
 
 async function markVentaPagada(id) {
-  if (!confirm('¿Marcar este ticket como pagado?')) return;
+  // Buscar la venta para ver su estado
+  const venta = S.ventas?.find(v => v._id === id);
+  
+  let msg = '¿Marcar este ticket como pagado?';
+  if (venta?.paymentMethod === 'fiado' && venta?.pagadoPorVendedora) {
+    msg = '¿CONFIRMAR que recibiste el dinero? Se marcará como Pagado definitivamente';
+  }
+  
+  if (!confirm(msg)) return;
   try {
-    const venta = await api(`/ventas/${id}/pagada`, { method: 'PATCH', body: {} });
-    toast(`✅ Ticket #${venta._id.slice(-4)} marcado como pagado`, 'success');
+    const result = await api(`/ventas/${id}/pagada`, { method: 'PATCH', body: { source: 'admin' } });
+    
+    let toastMsg = `✅ Ticket #${result._id.slice(-4)} marcado como pagado`;
+    if (result.paymentMethod === 'fiado' && result.pagado && result.pagadoPorVendedora) {
+      toastMsg = `✅ Confirmed! Ticket #${result._id.slice(-4)} está completamente pagado`;
+    }
+    
+    toast(toastMsg, 'success');
     loadTodaySales();
     loadDashboard();
   } catch (e) {
     toast(`❌ ${e.message}`, 'error');
+
+  async function markFiadoPagadoVendedora(ventaId) {
+    if (!confirm('¿Marcar que YA RECIBISTE el dinero de este fiado?')) return;
+    try {
+      const result = await api(`/ventas/${ventaId}/pagada`, { 
+        method: 'PATCH', 
+        body: { source: 'vendedora' }
+      });
+    
+      if (result.pagadoPorVendedora) {
+        toast(`✅ Fiado registrado como pagado. ${result.nombreDeudor} ya pagó`, 'success');
+      }
+    
+      loadTodaySales();
+      loadDashboard();
+    } catch (e) {
+      toast(`❌ ${e.message}`, 'error');
+    }
+  }
   }
 }
 
@@ -1301,7 +1398,12 @@ function openReceiptModal() {
       : `<span style="color:red">Falta: -${money(Math.abs(tot.diferencia))}</span>`;
 
     const pagos = data.ventas.reduce((acc, v) => {
-      const key = (v.paymentMethod || 'efectivo') === 'transferencia' ? 'Transferencia' : 'Efectivo';
+      let key = 'Efectivo';
+      if (v.paymentMethod === 'transferencia') {
+        key = 'Transferencia';
+      } else if (v.paymentMethod === 'fiado') {
+        key = `Fiado (${v.nombreDeudor || '?'})`;
+      }
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {});
@@ -2559,6 +2661,60 @@ async function init() {
   // Load state
   await loadCandies();
   loadDashboard();
+  selectPaymentMethod('efectivo');  // Set default payment method
+}
+
+// ─────────────────────────────────────────────
+//  PAYMENT METHOD HANDLING
+// ─────────────────────────────────────────────
+function selectPaymentMethod(method) {
+  S.currentPaymentMethod = method;
+  
+  // Update button styles
+  ['efectivo', 'transferencia', 'fiado'].forEach(m => {
+    const btn = $(`pay-${m}`);
+    if (btn) {
+      if (m === method) {
+        btn.style.opacity = '1';
+        btn.style.transform = 'scale(1.05)';
+        btn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+      } else {
+        btn.style.opacity = '0.5';
+        btn.style.transform = 'scale(1)';
+        btn.style.boxShadow = 'none';
+      }
+    }
+  });
+  
+  updatePaymentDisplay();
+}
+
+function updatePaymentDisplay() {
+  const method = S.currentPaymentMethod || 'efectivo';
+  const pagoSection = $('pago-section');
+  
+  if (!pagoSection) return;
+  
+  if (method === 'fiado') {
+    // Show deudor name input
+    pagoSection.innerHTML = `
+      <div>
+        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Nombre del Deudor</div>
+        <input id="deudor-nombre" type="text" class="form-input" placeholder="Ej: Juan García" maxlength="50"/>
+      </div>
+    `;
+  } else {
+    // Show dinero recibido input
+    pagoSection.innerHTML = `
+      <div>
+        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Dinero Recibido</div>
+        <div id="rec-input-wrap" style="border: 3px solid var(--orange); border-radius:14px;">
+          <input id="received-input" type="number" step="0.01" min="0" placeholder="0.00"
+            oninput="calcDiff()" style="color:var(--purple); border:none; outline:none; background:transparent; font-size:1.5rem; font-weight:800; width:100%; padding:10px 16px;"/>
+        </div>
+      </div>
+    `;
+  }
 }
 
 init();

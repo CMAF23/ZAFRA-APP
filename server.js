@@ -176,7 +176,8 @@ const ventaSchema = new mongoose.Schema({
   fecha:              { type: Date, default: Date.now },
   diaSemana:          Number,   // 0=Dom … 6=Sáb
   source:             { type: String, enum: ['admin', 'companera'], default: 'admin' },
-  paymentMethod:      { type: String, enum: ['efectivo', 'transferencia'], default: 'efectivo' },
+  paymentMethod:      { type: String, enum: ['efectivo', 'transferencia', 'fiado'], default: 'efectivo' },
+  nombreDeudor:       String,   // Nombre de quien debe (solo para fiado)
   detalles:           [detalleSchema],
   totalEsperado:      { type: Number, required: true },
   totalRecibido:      { type: Number, required: true },
@@ -186,6 +187,8 @@ const ventaSchema = new mongoose.Schema({
   notas:              String,
   pagado:             { type: Boolean, default: false },
   fechaPago:          Date,
+  pagadoPorVendedora: { type: Boolean, default: false },
+  fechaPagoPorVendedora: Date,
 }, { timestamps: true });
 const Venta = mongoose.model('Venta', ventaSchema);
 
@@ -644,8 +647,13 @@ app.get('/api/ventas/hoy', async (req, res) => {
 
 app.post('/api/ventas', async (req, res) => {
   try {
-    const { detalles, totalRecibido, notas, paymentMethod = 'efectivo' } = req.body;
+    const { detalles, totalRecibido, notas, paymentMethod = 'efectivo', nombreDeudor } = req.body;
     if (!detalles?.length) return res.status(400).json({ error: 'Sin detalles de venta' });
+
+    // Validar que si es fiado, debe tener nombre del deudor
+    if (paymentMethod === 'fiado' && !nombreDeudor?.trim()) {
+      return res.status(400).json({ error: 'El nombre del deudor es requerido para ventas fiadas' });
+    }
 
     const semana = await getOrCreateCurrentWeek();
     const ahora  = new Date();
@@ -672,7 +680,7 @@ app.post('/api/ventas', async (req, res) => {
     const diferencia         = parseFloat((totalRecibido - totalEsperado).toFixed(2));
     const comisionCalculada  = parseFloat((totalEsperado * 0.12).toFixed(2));
 
-    const venta = await Venta.create({
+    const ventaData = {
       fecha: ahora,
       diaSemana: ahora.getDay(),
       detalles: detallesOk,
@@ -683,7 +691,14 @@ app.post('/api/ventas', async (req, res) => {
       comisionCalculada,
       semanaId: semana._id,
       notas,
-    });
+    };
+
+    // Si es fiado, guardar el nombre del deudor
+    if (paymentMethod === 'fiado') {
+      ventaData.nombreDeudor = nombreDeudor.trim();
+    }
+
+    const venta = await Venta.create(ventaData);
 
     // Actualizar totales de semana
     await Semana.findByIdAndUpdate(semana._id, {
@@ -704,14 +719,27 @@ app.post('/api/ventas', async (req, res) => {
 
 app.patch('/api/ventas/:id/pagada', async (req, res) => {
   try {
-    const venta = await Venta.findByIdAndUpdate(
-      req.params.id,
-      { pagado: true, fechaPago: new Date() },
-      { new: true }
-    );
-
-    if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
-    res.json(venta);
+        const { source } = req.body;  // 'vendedora' o 'admin'
+        
+        if (source === 'vendedora') {
+          // Vendedora marca como pagado (solo para sistema interno de ella)
+          const venta = await Venta.findByIdAndUpdate(
+            req.params.id,
+            { pagadoPorVendedora: true, fechaPagoPorVendedora: new Date() },
+            { new: true }
+          );
+          if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
+          res.json(venta);
+        } else {
+          // Admin marca como pagado (confirmación final)
+          const venta = await Venta.findByIdAndUpdate(
+            req.params.id,
+            { pagado: true, fechaPago: new Date() },
+            { new: true }
+          );
+          if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
+          res.json(venta);
+        }
   } catch (e) {
     console.error('PATCH /api/ventas/:id/pagada:', e);
     res.status(500).json({ error: e.message });
