@@ -330,7 +330,6 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
               <button id="pay-efectivo" class="btn btn-sm" style="background:#22C55E;color:#fff;border:none;cursor:pointer;border-radius:8px;font-weight:700" onclick="selectPaymentMethod('efectivo')">💵 Efectivo</button>
               <button id="pay-transferencia" class="btn btn-sm" style="background:#3B82F6;color:#fff;border:none;cursor:pointer;border-radius:8px;font-weight:700" onclick="selectPaymentMethod('transferencia')">🏦 Transferencia</button>
-              <button id="pay-fiado" class="btn btn-sm" colspan="2" style="background:#F59E0B;color:#fff;border:none;cursor:pointer;border-radius:8px;font-weight:700;grid-column:1/-1" onclick="selectPaymentMethod('fiado')">📋 Fiado</button>
             </div>
           </div>
           <hr class="mb-3"/>
@@ -1101,30 +1100,13 @@ async function saveSale() {
 
   if (!detalles.length) { toast('Ingresa al menos 1 dulce vendido', 'err'); return; }
 
-  // Validar método de pago
+  // Validar método de pago (solo efectivo/transferencia en admin)
   const paymentMethod = S.currentPaymentMethod || 'efectivo';
-  
   let totalRecibido = parseFloat($('received-input').value || 0);
-  
-  if (paymentMethod === 'fiado') {
-    const nombreDeudor = ($('deudor-nombre').value || '').trim();
-    if (!nombreDeudor) { toast('Ingresa el nombre del deudor', 'err'); return; }
-    totalRecibido = 0;  // Para fiado, totalRecibido es 0 inicialmente
-  } else {
-    if (isNaN(totalRecibido) || totalRecibido < 0) { toast('Ingresa el dinero recibido', 'err'); return; }
-  }
+  if (isNaN(totalRecibido) || totalRecibido < 0) { toast('Ingresa el dinero recibido', 'err'); return; }
 
   try {
-    const body = { 
-      detalles, 
-      totalRecibido, 
-      notas: $('venta-notas').value,
-      paymentMethod
-    };
-    if (paymentMethod === 'fiado') {
-      body.nombreDeudor = $('deudor-nombre').value.trim();
-    }
-    
+    const body = { detalles, totalRecibido, notas: $('venta-notas').value, paymentMethod };
     const venta = await api('/ventas', { body });
     toast('Venta registrada correctamente');
     S.ventaHoy = venta;
@@ -2671,7 +2653,7 @@ function selectPaymentMethod(method) {
   S.currentPaymentMethod = method;
   
   // Update button styles
-  ['efectivo', 'transferencia', 'fiado'].forEach(m => {
+  ['efectivo', 'transferencia'].forEach(m => {
     const btn = $(`pay-${m}`);
     if (btn) {
       if (m === method) {
