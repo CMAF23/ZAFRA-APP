@@ -1230,8 +1230,13 @@ app.get('/api/companera/inventario', async (req, res) => {
  */
 app.post('/api/companera/venta', async (req, res) => {
   try {
-    const { detalles, totalRecibido = 0, notas, paymentMethod = 'efectivo' } = req.body;
+    const { detalles, totalRecibido = 0, notas, paymentMethod = 'efectivo', nombreDeudor } = req.body;
     if (!detalles?.length) return res.status(400).json({ error: 'Sin detalles de venta' });
+
+    // Validar que si es fiado, debe tener nombre del deudor
+    if (paymentMethod === 'fiado' && !nombreDeudor?.trim()) {
+      return res.status(400).json({ error: 'El nombre de quien debe es requerido para ventas fiadas' });
+    }
 
     const semana = await getOrCreateCurrentWeek();
     const ahora  = new Date();
@@ -1258,7 +1263,7 @@ app.post('/api/companera/venta', async (req, res) => {
     const diferencia        = parseFloat((+totalRecibido - totalEsperado).toFixed(2));
     const comisionCalculada = parseFloat((totalEsperado * 0.12).toFixed(2));
 
-    const venta = await Venta.create({
+    const ventaCompaneraData = {
       fecha: ahora,
       diaSemana: ahora.getDay(),
       source: 'companera',
@@ -1270,7 +1275,13 @@ app.post('/api/companera/venta', async (req, res) => {
       comisionCalculada,
       semanaId: semana._id,
       notas,
-    });
+    };
+
+    if (paymentMethod === 'fiado') {
+      ventaCompaneraData.nombreDeudor = nombreDeudor.trim();
+    }
+
+    const venta = await Venta.create(ventaCompaneraData);
 
     await Semana.findByIdAndUpdate(semana._id, {
       $inc: { totalVentas: totalEsperado, totalComision: comisionCalculada, numeroDias: 1 },
@@ -1283,6 +1294,40 @@ app.post('/api/companera/venta', async (req, res) => {
     res.status(201).json(venta);
   } catch (e) {
     console.error('POST /api/companera/venta:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/companera/ventas/fiado
+ * Ventas fiadas pendientes de pago de la compañera
+ */
+app.get('/api/companera/ventas/fiado', async (req, res) => {
+  try {
+    const ventas = await Venta.find({
+      source: 'companera',
+      paymentMethod: 'fiado',
+      pagadoPorVendedora: { $ne: true },
+    }).sort('-fecha').limit(50);
+    res.json({ ventas });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * PATCH /api/companera/ventas/:id/pagada
+ * La compañera marca un fiado como pagado (ella recibió el dinero)
+ */
+app.patch('/api/companera/ventas/:id/pagada', async (req, res) => {
+  try {
+    const venta = await Venta.findOneAndUpdate(
+      { _id: req.params.id, source: 'companera', paymentMethod: 'fiado' },
+      { pagadoPorVendedora: true, fechaPagoPorVendedora: new Date() },
+      { new: true }
+    );
+    if (!venta) return res.status(404).json({ error: 'Venta no encontrada o no es fiado' });
+    res.json(venta);
+  } catch (e) {
+    console.error('PATCH /api/companera/ventas/:id/pagada:', e);
     res.status(500).json({ error: e.message });
   }
 });
