@@ -1249,6 +1249,7 @@ app.get('/api/dashboard', async (req, res) => {
         fin:          semana.fechaFin,
         totalVentas:  semana.totalVentas,
         totalComision:semana.totalComision,
+        gananciaDespues12: +((semana.totalVentas - semana.totalComision).toFixed(2)),
         numeroDias:   semana.numeroDias,
         pagado:       semana.pagado,
       },

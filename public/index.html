@@ -233,7 +233,7 @@
     <h2 class="section-title mb-4">📊 Resumen General</h2>
 
     <!-- KPI Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
       <div class="card kpi" style="border-left:4px solid var(--pink)">
         <span class="kpi-lbl">Ventas Hoy</span>
         <span class="kpi-val" id="kpi-hoy" style="color:var(--pink)">$0.00</span>
@@ -253,6 +253,11 @@
         <span class="kpi-lbl">Semana Actual</span>
         <span class="kpi-val" id="kpi-semana" style="color:var(--purple)">$0.00</span>
         <span class="text-xs text-gray-400 font-semibold" id="kpi-semana-dias">0 días</span>
+      </div>
+      <div class="card kpi" style="border-left:4px solid var(--teal);background:linear-gradient(135deg,#F0FDF9,#ECFEF8)">
+        <span class="kpi-lbl">Ganancia neta (después 12%)</span>
+        <span class="kpi-val" id="kpi-ganancia-12" style="color:var(--teal)">$0.00</span>
+        <span class="text-xs text-gray-400 font-semibold">Después comisión compañera</span>
       </div>
       <div class="card kpi" style="border-left:4px solid var(--green)">
         <span class="kpi-lbl">Comisión Semana</span>
@@ -991,6 +996,9 @@ async function loadDashboard() {
     $('kpi-semana').textContent    = money(d.semana.totalVentas);
     $('kpi-semana-dias').textContent = `${d.semana.numeroDias} día${d.semana.numeroDias!==1?'s':''}`;
     $('kpi-com-semana').textContent = money(d.semana.totalComision);
+    if (d.semana && typeof d.semana.gananciaDespues12 !== 'undefined') {
+      $('kpi-ganancia-12').textContent = money(d.semana.gananciaDespues12);
+    }
 
     renderBolsasRecovery(d.bolsas);
     renderChart(d.grafica7dias);
