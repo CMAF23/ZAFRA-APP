@@ -1104,7 +1104,6 @@ async function loadCandiesForSale() {
 }
 
 function renderSaleRows() {
-  const rows = S.candies.map(c => `
   const rows = S.candies.map(c => {
     const stock = S.stockById && S.stockById[c._id];
     const disponibles = stock ? (stock.disponibles || 0) : '-';
