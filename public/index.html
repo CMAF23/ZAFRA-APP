@@ -307,7 +307,7 @@
                 </tr>
               </thead>
               <tbody id="sale-rows">
-                <tr><td colspan="4" class="empty-state">Cargando dulces…</td></tr>
+                <tr><td colspan="5" class="empty-state">Cargando dulces…</td></tr>
               </tbody>
             </table>
           </div>
@@ -1126,7 +1126,7 @@ function renderSaleRows() {
       <td class="text-right ${stockCls}" style="width:90px">${disponibles}</td>
     </tr>`;
   }).join('');
-  $('sale-rows').innerHTML = rows || `<tr><td colspan="4" class="empty-state">Sin dulces</td></tr>`;
+  $('sale-rows').innerHTML = rows || `<tr><td colspan="5" class="empty-state">Sin dulces</td></tr>`;
   calcTotals();
   updateSaleSoldBadges();
 }
