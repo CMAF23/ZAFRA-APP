@@ -337,6 +337,14 @@
               <button id="pay-transferencia" class="btn btn-sm" style="background:#3B82F6;color:#fff;border:none;cursor:pointer;border-radius:8px;font-weight:700" onclick="selectPaymentMethod('transferencia')">🏦 Transferencia</button>
             </div>
           </div>
+          <!-- Comisión toggle -->
+          <div class="mb-3">
+            <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Aplicar comisión</div>
+            <div style="display:flex;gap:8px">
+              <button id="commission-on" class="btn btn-sm" style="background:#FF4D6D;color:#fff;border:none;border-radius:8px;font-weight:700" onclick="toggleOwnerSale(false)">Con comisión</button>
+              <button id="commission-off" class="btn btn-sm btn-outline" style="border-radius:8px;font-weight:700" onclick="toggleOwnerSale(true)">Sin comisión</button>
+            </div>
+          </div>
           <hr class="mb-3"/>
 
           <!-- Dinero Recibido o Nombre Deudor -->
@@ -857,6 +865,7 @@ const S = {
   ventas: [],
   vendidasHoy: {},
   vendidasHoyByName: {},
+  ownerSale: false, // si true -> esta venta no aplica comisión (venta del dueño)
 };
 
 // ─── UTILS ──────────────────────────────────────────────────
@@ -1123,7 +1132,9 @@ function calcTotals() {
     const sub = qty * c.precioUnitario;
     const rate = Number(c.commissionRate ?? 0.12);
     total += sub;
-    comision += sub * (Number.isFinite(rate) ? rate : 0.12);
+    if (!S.ownerSale) {
+      comision += sub * (Number.isFinite(rate) ? rate : 0.12);
+    }
     const el = $('sub-' + c._id);
     if (el) el.textContent = money(sub);
   });
@@ -1158,8 +1169,8 @@ async function saveSale() {
   let totalRecibido = parseFloat($('received-input').value || 0);
   if (isNaN(totalRecibido) || totalRecibido < 0) { toast('Ingresa el dinero recibido', 'err'); return; }
 
-  try {
-    const body = { detalles, totalRecibido, notas: $('venta-notas').value, paymentMethod };
+    try {
+    const body = { detalles, totalRecibido, notas: $('venta-notas').value, paymentMethod, ownerSale: !!S.ownerSale };
     const venta = await api('/ventas', { body });
     toast('Venta registrada correctamente');
     S.ventaHoy = venta;
@@ -1216,6 +1227,8 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
       showMarkPaidBtn = true;
     }
   }
+  // Etiqueta venta del dueño
+  const ownerBadge = v.ownerSale ? `<span style="background:#F3F4F6;color:#0f172a;font-size:.75rem;font-weight:700;padding:2px 10px;border-radius:999px;">🏷️ Venta del dueño</span>` : '';
 
   return `
   <div class="card mb-2" style="background:#F9FAFB; border-left:3px solid var(--orange)">
@@ -1223,6 +1236,7 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
       <span class="text-sm font-bold text-gray-500">⏰ ${fechaTxt}</span>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
         <span class="badge-pending text-xs">Venta #${v._id.slice(-4)}</span>
+        ${ownerBadge}
         <span class="venta-pay ${paymentColor}">
           Pago: ${paymentDisplay}
         </span>
@@ -2831,12 +2845,36 @@ async function init() {
   await loadCandies();
   loadDashboard();
   selectPaymentMethod('efectivo');  // Set default payment method
+  toggleOwnerSale(false); // Por defecto aplicar comisión
 }
 
 // ─────────────────────────────────────────────
 //  PAYMENT METHOD HANDLING
 // ─────────────────────────────────────────────
 function selectPaymentMethod(method) {
+  function toggleOwnerSale(flag) {
+    S.ownerSale = !!flag;
+    const onBtn = $('commission-on');
+    const offBtn = $('commission-off');
+    if (onBtn && offBtn) {
+      if (S.ownerSale) {
+        onBtn.classList.remove('btn'); onBtn.classList.remove('btn-sm');
+        onBtn.style.opacity = '0.6'; onBtn.style.transform = 'scale(1)';
+
+        offBtn.classList.add('btn'); offBtn.classList.add('btn-sm');
+        offBtn.style.opacity = '1'; offBtn.style.transform = 'scale(1.05)';
+        offBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)';
+      } else {
+        offBtn.classList.remove('btn'); offBtn.classList.remove('btn-sm');
+        offBtn.style.opacity = '0.6'; offBtn.style.transform = 'scale(1)';
+
+        onBtn.classList.add('btn'); onBtn.classList.add('btn-sm');
+        onBtn.style.opacity = '1'; onBtn.style.transform = 'scale(1.05)';
+        onBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)';
+      }
+    }
+    calcTotals();
+  }
   S.currentPaymentMethod = method;
   
   // Update button styles

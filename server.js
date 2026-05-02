@@ -832,7 +832,7 @@ app.get('/api/ventas/hoy', async (req, res) => {
 
 app.post('/api/ventas', async (req, res) => {
   try {
-    const { detalles, totalRecibido, notas, paymentMethod = 'efectivo', nombreDeudor } = req.body;
+    const { detalles, totalRecibido, notas, paymentMethod = 'efectivo', nombreDeudor, ownerSale = false } = req.body;
     if (!detalles?.length) return res.status(400).json({ error: 'Sin detalles de venta' });
 
     // Validar que si es fiado, debe tener nombre del deudor
@@ -850,8 +850,9 @@ app.post('/api/ventas', async (req, res) => {
       const candy = await Candy.findById(d.candyId);
       if (!candy) continue;
       const subtotal = +d.cantidadVendida * candy.precioUnitario;
-      const commissionRate = getCommissionRate(candy);
-      const comisionCalculada = calcDetalleComision(subtotal, candy);
+      // Si la venta es del dueño (ownerSale) no aplicamos comisión en este ticket
+      const commissionRate = ownerSale ? 0 : getCommissionRate(candy);
+      const comisionCalculada = ownerSale ? 0 : calcDetalleComision(subtotal, candy);
       totalEsperado += subtotal;
       detallesOk.push({
         candyId:         candy._id,
@@ -881,6 +882,9 @@ app.post('/api/ventas', async (req, res) => {
       semanaId: semana._id,
       notas,
     };
+
+    // Marcar que esta venta fue registrada como venta del dueño (sin comisión)
+    if (ownerSale) ventaData.ownerSale = true;
 
     // Si es fiado, guardar el nombre del deudor
     if (paymentMethod === 'fiado') {
