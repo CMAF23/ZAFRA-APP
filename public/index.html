@@ -1107,7 +1107,19 @@ async function loadCandiesForSale() {
 function renderSaleRows() {
   const rows = S.candies.map(c => {
     const stock = S.stockById && S.stockById[c._id];
-    const disponibles = stock ? (stock.disponibles || 0) : '-';
+    // Calcular piezas disponibles igual que en el panel de "mi vendedora":
+    // sumar sobre S.bolsas (piezasTotales - piezasVendidas - piezasEntregadas)
+    let disponibles = '-';
+    if (S.bolsas && S.bolsas.length > 0) {
+      disponibles = S.bolsas
+        .filter(b => {
+          const bolsaCandyId = b.candyId?._id ? b.candyId._id.toString() : b.candyId;
+          return bolsaCandyId === c._id;
+        })
+        .reduce((sum, b) => sum + ((b.piezasTotales || 0) - (b.piezasVendidas || 0) - (b.piezasEntregadas || 0)), 0);
+    } else {
+      disponibles = stock ? (stock.disponibles || 0) : '-';
+    }
     const entregados = stock ? (stock.totalEntregadas || 0) : '-';
     const stockCls = (disponibles === 0) ? 'text-red-500 font-bold' : 'text-gray-600';
     return `
