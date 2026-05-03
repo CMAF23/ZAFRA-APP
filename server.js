@@ -187,6 +187,7 @@ const ventaSchema = new mongoose.Schema({
   totalRecibido:      { type: Number, required: true },
   diferencia:         Number,   // recibido - esperado (+ = sobrante, - = faltante)
   comisionCalculada:  Number,   // totalEsperado * 0.12
+  ownerSale:          { type: Boolean, default: false }, // true = venta del dueño (sin comisión)
   semanaId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Semana' },
   notas:              String,
   pagado:             { type: Boolean, default: false },
