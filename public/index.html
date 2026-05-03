@@ -1107,10 +1107,13 @@ async function loadCandiesForSale() {
 function renderSaleRows() {
   const rows = S.candies.map(c => {
     const stock = S.stockById && S.stockById[c._id];
-    // Calcular piezas disponibles igual que en el panel de "mi vendedora":
-    // sumar sobre S.bolsas (piezasTotales - piezasVendidas - piezasEntregadas)
-    let disponibles = '-';
-    if (S.bolsas && S.bolsas.length > 0) {
+    // Preferir el valor que muestra el panel de vendedora (`c.disponibles`) si está disponible.
+    // Si no está en `c`, calcular como suma de bolsas (piezasTotales - piezasVendidas - piezasEntregadas),
+    // y como último recurso usar `stock.disponibles`.
+    let disponibles;
+    if (typeof c.disponibles !== 'undefined' && c.disponibles !== null) {
+      disponibles = c.disponibles;
+    } else if (S.bolsas && S.bolsas.length > 0) {
       disponibles = S.bolsas
         .filter(b => {
           const bolsaCandyId = b.candyId?._id ? b.candyId._id.toString() : b.candyId;
