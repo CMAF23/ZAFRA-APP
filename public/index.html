@@ -303,11 +303,12 @@
                   <th>Precio</th>
                   <th style="width:110px">Cantidad</th>
                   <th style="text-align:right">Subtotal</th>
+                  <th style="width:90px;text-align:right">Entregados</th>
                   <th style="width:90px;text-align:right">Disponibles</th>
                 </tr>
               </thead>
               <tbody id="sale-rows">
-                <tr><td colspan="5" class="empty-state">Cargando dulces…</td></tr>
+                <tr><td colspan="6" class="empty-state">Cargando dulces…</td></tr>
               </tbody>
             </table>
           </div>
@@ -1107,6 +1108,7 @@ function renderSaleRows() {
   const rows = S.candies.map(c => {
     const stock = S.stockById && S.stockById[c._id];
     const disponibles = stock ? (stock.disponibles || 0) : '-';
+    const entregados = stock ? (stock.totalEntregadas || 0) : '-';
     const stockCls = (disponibles === 0) ? 'text-red-500 font-bold' : 'text-gray-600';
     return `
     <tr class="sale-row" data-id="${c._id}" data-price="${c.precioUnitario}">
@@ -1122,10 +1124,11 @@ function renderSaleRows() {
           oninput="calcTotals()" class="sale-row-qty"/>
       </td>
       <td class="text-right font-bold" id="sub-${c._id}">$0.00</td>
+      <td class="text-right text-yellow-600 font-bold" style="width:90px">${entregados}</td>
       <td class="text-right ${stockCls}" style="width:90px">${disponibles}</td>
     </tr>`;
   }).join('');
-  $('sale-rows').innerHTML = rows || `<tr><td colspan="5" class="empty-state">Sin dulces</td></tr>`;
+  $('sale-rows').innerHTML = rows || `<tr><td colspan="6" class="empty-state">Sin dulces</td></tr>`;
   calcTotals();
   updateSaleSoldBadges();
 }
@@ -2868,29 +2871,6 @@ async function init() {
 //  PAYMENT METHOD HANDLING
 // ─────────────────────────────────────────────
 function selectPaymentMethod(method) {
-  function toggleOwnerSale(flag) {
-    S.ownerSale = !!flag;
-    const onBtn = $('commission-on');
-    const offBtn = $('commission-off');
-    if (onBtn && offBtn) {
-      if (S.ownerSale) {
-        onBtn.classList.remove('btn'); onBtn.classList.remove('btn-sm');
-        onBtn.style.opacity = '0.6'; onBtn.style.transform = 'scale(1)';
-
-        offBtn.classList.add('btn'); offBtn.classList.add('btn-sm');
-        offBtn.style.opacity = '1'; offBtn.style.transform = 'scale(1.05)';
-        offBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)';
-      } else {
-        offBtn.classList.remove('btn'); offBtn.classList.remove('btn-sm');
-        offBtn.style.opacity = '0.6'; offBtn.style.transform = 'scale(1)';
-
-        onBtn.classList.add('btn'); onBtn.classList.add('btn-sm');
-        onBtn.style.opacity = '1'; onBtn.style.transform = 'scale(1.05)';
-        onBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)';
-      }
-    }
-    calcTotals();
-  }
   S.currentPaymentMethod = method;
   
   // Update button styles
@@ -2910,6 +2890,32 @@ function selectPaymentMethod(method) {
   });
   
   updatePaymentDisplay();
+}
+
+function toggleOwnerSale(flag) {
+  S.ownerSale = !!flag;
+  const onBtn = $('commission-on');
+  const offBtn = $('commission-off');
+  if (onBtn && offBtn) {
+    if (S.ownerSale) {
+      // Sin comisión (owner) activo
+      onBtn.style.opacity = '0.5';
+      onBtn.style.background = '#FF4D6D';
+      offBtn.style.opacity = '1';
+      offBtn.style.background = '#E63946';
+      offBtn.style.borderColor = '#E63946';
+      offBtn.style.color = '#fff';
+    } else {
+      // Con comisión (normal) activo
+      onBtn.style.opacity = '1';
+      onBtn.style.background = '#FF4D6D';
+      offBtn.style.opacity = '0.5';
+      offBtn.style.background = 'transparent';
+      offBtn.style.borderColor = '#E5E7EB';
+      offBtn.style.color = 'var(--text)';
+    }
+  }
+  calcTotals();
 }
 
 function updatePaymentDisplay() {
