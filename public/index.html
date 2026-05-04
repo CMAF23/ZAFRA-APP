@@ -2160,7 +2160,8 @@ async function closeSemana(id) {
 
 async function openWeeklyReceipt(semanaId) {
   try {
-    const { semana, ventas } = await api('/semanas/actual');
+    const endpoint = semanaId ? `/semanas/${semanaId}` : '/semanas/actual';
+    const { semana, ventas } = await api(endpoint);
     const inicioSemana = semana.fechaInicio || semana.inicio;
     const finSemana = semana.fechaFin || semana.fin;
     const diasMap = {};
@@ -2212,6 +2213,14 @@ async function openWeeklyReceipt(semanaId) {
           Generado: ${new Date().toLocaleString('es-MX')}
         </div>
       </div>`;
+
+    const footer = $('modal-receipt').querySelector('.flex.gap-3.mt-4');
+    if (footer) {
+      footer.innerHTML = `
+        ${semana.pagado ? '' : `<button class="btn btn-success flex-1" onclick="closeSemana('${semana._id}')">✅ Marcar como Pagada</button>`}
+        <button class="btn btn-primary flex-1" onclick="printReceipt()">🖨️ Imprimir</button>
+        <button class="btn btn-outline flex-1" onclick="closeModal('modal-receipt')">Cerrar</button>`;
+    }
     $('modal-receipt').style.display = 'flex';
   } catch {}
 }
@@ -2233,6 +2242,10 @@ function renderSemanasHistory(semanas) {
         ${s.pagado
           ? `<span class="badge-recovered text-xs">✅ Pagada</span>`
           : `<span class="badge-pending text-xs">⏳ Pendiente</span>`}
+        <div class="mt-2 flex gap-2 justify-end flex-wrap">
+          <button class="btn btn-outline text-xs" style="padding:6px 10px" onclick="openWeeklyReceipt('${s._id}')">Ver recibo</button>
+          ${s.pagado ? '' : `<button class="btn btn-primary text-xs" style="padding:6px 10px" onclick="closeSemana('${s._id}')">Pagar</button>`}
+        </div>
       </div>
     </div>`).join('');
 }
