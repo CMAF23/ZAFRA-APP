@@ -1204,7 +1204,9 @@ app.get('/api/semanas/:id', async (req, res) => {
   try {
     const semana = await Semana.findById(req.params.id);
     if (!semana) return res.status(404).json({ error: 'Semana no encontrada' });
-    const ventas = await Venta.find({ semanaId: semana._id }).sort('fecha');
+    const ventas = await Venta.find({
+      fecha: { $gte: semana.fechaInicio, $lte: semana.fechaFin },
+    }).sort('fecha');
     res.json({ semana, ventas });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
