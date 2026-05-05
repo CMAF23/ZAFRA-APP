@@ -188,6 +188,7 @@ const ventaSchema = new mongoose.Schema({
   diferencia:         Number,   // recibido - esperado (+ = sobrante, - = faltante)
   comisionCalculada:  Number,   // totalEsperado * 0.12
   ownerSale:          { type: Boolean, default: false }, // true = venta del dueño (sin comisión)
+  commissionWaived:   { type: Boolean, default: false }, // true = comisión quitada manualmente
   semanaId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Semana' },
   notas:              String,
   pagado:             { type: Boolean, default: false },
@@ -880,6 +881,7 @@ app.post('/api/ventas', async (req, res) => {
       totalRecibido: +totalRecibido,
       diferencia,
       comisionCalculada,
+      commissionWaived: !!ownerSale,
       semanaId: semana._id,
       notas,
     };
@@ -936,6 +938,50 @@ app.patch('/api/ventas/:id/pagada', async (req, res) => {
         }
   } catch (e) {
     console.error('PATCH /api/ventas/:id/pagada:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/ventas/:id/comision', async (req, res) => {
+  try {
+    const venta = await Venta.findById(req.params.id);
+    if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
+
+    const currentCommission = Number(venta.comisionCalculada || 0);
+    const originalCommission = (venta.detalles || []).reduce(
+      (acc, d) => acc + (Number(d.comisionCalculada) || 0),
+      0
+    );
+
+    const commissionWaived = typeof req.body?.commissionWaived === 'boolean'
+      ? req.body.commissionWaived
+      : !venta.commissionWaived;
+
+    const nextCommission = commissionWaived || venta.ownerSale
+      ? 0
+      : +originalCommission.toFixed(2);
+
+    const updated = await Venta.findByIdAndUpdate(
+      req.params.id,
+      {
+        commissionWaived: commissionWaived || venta.ownerSale,
+        comisionCalculada: nextCommission,
+      },
+      { new: true }
+    );
+
+    if (venta.semanaId) {
+      const delta = +(nextCommission - currentCommission).toFixed(2);
+      if (delta !== 0) {
+        await Semana.findByIdAndUpdate(venta.semanaId, {
+          $inc: { totalComision: delta },
+        });
+      }
+    }
+
+    res.json(updated);
+  } catch (e) {
+    console.error('PATCH /api/ventas/:id/comision:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1492,6 +1538,7 @@ app.post('/api/companera/venta', async (req, res) => {
       totalRecibido: +totalRecibido,
       diferencia,
       comisionCalculada,
+      commissionWaived: false,
       semanaId: semana._id,
       notas,
     };

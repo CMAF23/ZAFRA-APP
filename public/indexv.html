@@ -626,6 +626,10 @@ function renderVentaHistorial(v){
 
   let fiadoStatusBadge = '';
   let showPagadoBtn = false;
+  const comisionCero = Boolean(venta.commissionWaived || venta.ownerSale || Number(venta.comisionCalculada || 0) === 0);
+  const comisionBadge = comisionCero
+    ? `<span style="background:#ECFDF5;color:#047857;font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:20px">🧾 Comisión 0.0</span>`
+    : '';
   if(esFiado){
     if(confirmadoPorAdmin){
       fiadoStatusBadge = `<span style="background:#D1FAE5;color:#065F46;font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:20px">✅ Pagado y confirmado</span>`;
@@ -643,6 +647,7 @@ function renderVentaHistorial(v){
         <span class="venta-time">⏰ ${fmt(v.fecha)} · ${fmtDate(v.fecha)}</span>
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
           <span class="venta-tag">Venta #${v._id.slice(-4)}</span>
+          ${comisionBadge}
           <span class="venta-pay ${payCls}" style="${esFiado?'background:#FEF3C7;color:#92400E;':''}">
             ${payLabel}
           </span>
@@ -691,6 +696,7 @@ function showTicket(venta){
   let metodoPago = 'Efectivo';
   if(venta.paymentMethod === 'transferencia') metodoPago = 'Transferencia';
   else if(venta.paymentMethod === 'fiado') metodoPago = `FIADO - ${venta.nombreDeudor || '?'}`;
+  const comisionCero = Boolean(venta.commissionWaived || venta.ownerSale || Number(venta.comisionCalculada || 0) === 0);
   const lineas=venta.detalles
     .filter(d=>d.cantidadVendida>0)
     .map(d=>{
@@ -709,6 +715,7 @@ function showTicket(venta){
 ━━━━━━━━━━━━━━━━━━━━━━━
 Fecha: ${fecha}
 Pago: ${metodoPago}
+${comisionCero ? 'Comisión: 0.0\n' : ''}
 ─────────────────────────
 DULCE          CANT   TOTAL
 ─────────────────────────

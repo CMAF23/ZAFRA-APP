@@ -1228,6 +1228,7 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
   const estaPagada = Boolean(v.pagado);
   const recibidoTxt = estaPagada ? `$${gananciaNeta}` : money(v.totalRecibido);
   const diferenciaTxt = estaPagada ? money(0) : `${v.diferencia>=0?'+':''}${money(v.diferencia)}`;
+  const comisionCero = Boolean(v.commissionWaived || v.ownerSale || Number(v.comisionCalculada || 0) === 0);
 
   // Payment method display
   let paymentDisplay = 'Efectivo';
@@ -1263,6 +1264,11 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
   }
   // Etiqueta venta del dueño
   const ownerBadge = v.ownerSale ? `<span style="background:#F3F4F6;color:#0f172a;font-size:.75rem;font-weight:700;padding:2px 10px;border-radius:999px;">🏷️ Venta del dueño</span>` : '';
+  const commissionBadge = comisionCero ? `<span style="background:#ECFDF5;color:#047857;font-size:.75rem;font-weight:700;padding:2px 10px;border-radius:999px;">🧾 Comisión 0.0</span>` : '';
+  const commissionButton = v.ownerSale ? '' : `
+      <button onclick="toggleComisionVenta('${v._id}', ${comisionCero ? 'false' : 'true'})" style="background:${comisionCero ? '#64748B' : '#7C3AED'};color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
+        ${comisionCero ? '↩️ Restaurar comisión' : '🧾 Quitar comisión'}
+      </button>`;
 
   return `
   <div class="card mb-2" style="background:#F9FAFB; border-left:3px solid var(--orange)">
@@ -1271,6 +1277,7 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
         <span class="badge-pending text-xs">Venta #${v._id.slice(-4)}</span>
         ${ownerBadge}
+        ${commissionBadge}
         <span class="venta-pay ${paymentColor}">
           Pago: ${paymentDisplay}
         </span>
@@ -1307,6 +1314,7 @@ function renderVentaCard(v, { showDate = false, archive = false } = {}) {
       <button onclick="markVentaPagada('${v._id}')" style="background:#22C55E;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
         ${v.pagadoPorVendedora ? '✅ Confirmar Pagado' : '✅ Marcar pagada'}
       </button>` : ''}
+      ${commissionButton}
       <button onclick="ticketCompanera('${v._id}')" style="background:#f0a000;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer">
         🧾 Ticket
       </button>
@@ -1438,25 +1446,39 @@ async function markVentaPagada(id) {
     loadDashboard();
   } catch (e) {
     toast(`❌ ${e.message}`, 'error');
-
-  async function markFiadoPagadoVendedora(ventaId) {
-    if (!confirm('¿Marcar que YA RECIBISTE el dinero de este fiado?')) return;
-    try {
-      const result = await api(`/ventas/${ventaId}/pagada`, { 
-        method: 'PATCH', 
-        body: { source: 'vendedora' }
-      });
-    
-      if (result.pagadoPorVendedora) {
-        toast(`✅ Fiado registrado como pagado. ${result.nombreDeudor} ya pagó`, 'success');
-      }
-    
-      loadTodaySales();
-      loadDashboard();
-    } catch (e) {
-      toast(`❌ ${e.message}`, 'error');
-    }
   }
+}
+
+async function toggleComisionVenta(id, commissionWaived) {
+  const venta = S.ventas?.find(v => v._id === id);
+  const actionTxt = commissionWaived ? 'quitar la comisión' : 'restaurar la comisión';
+  if (!confirm(`¿Seguro que quieres ${actionTxt} en este ticket?`)) return;
+  try {
+    await api(`/ventas/${id}/comision`, { method: 'PATCH', body: { commissionWaived } });
+    toast(commissionWaived ? '✅ Comisión quitada. La ganancia quedó pura.' : '✅ Comisión restaurada.', 'success');
+    loadTodaySales();
+    loadDashboard();
+  } catch (e) {
+    toast(`❌ ${e.message}`, 'error');
+  }
+}
+
+async function markFiadoPagadoVendedora(ventaId) {
+  if (!confirm('¿Marcar que YA RECIBISTE el dinero de este fiado?')) return;
+  try {
+    const result = await api(`/ventas/${ventaId}/pagada`, {
+      method: 'PATCH',
+      body: { source: 'vendedora' }
+    });
+
+    if (result.pagadoPorVendedora) {
+      toast(`✅ Fiado registrado como pagado. ${result.nombreDeudor} ya pagó`, 'success');
+    }
+
+    loadTodaySales();
+    loadDashboard();
+  } catch (e) {
+    toast(`❌ ${e.message}`, 'error');
   }
 }
 
@@ -2631,6 +2653,7 @@ function renderTicketCompanera(venta) {
         <div style="font-size:15px;font-weight:bold">DULCERÍA - COMPROBANTE</div>
         <div style="font-size:11px;color:#888">PARA: COMPAÑERA VENDEDORA</div>
         <div style="font-size:11px;color:#666">${formatDate(new Date(venta.fecha))} · ${formatTime(venta.fecha)}</div>
+        ${venta.commissionWaived || venta.ownerSale ? '<div style="margin-top:4px;display:inline-block;background:#ECFDF5;color:#047857;font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px;">🧾 Comisión 0.0</div>' : ''}
       </div>
       <hr style="border:1px dashed #ccc;margin:8px 0"/>
       <div style="font-size:11px;font-weight:bold;margin-bottom:4px">PRODUCTOS VENDIDOS:</div>
