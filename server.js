@@ -1436,6 +1436,7 @@ app.get('/api/recomendaciones', async (req, res) => {
 const COMPANERA_API_KEY = process.env.COMPANERA_API_KEY || '';
 
 app.use('/api/companera', (req, res, next) => {
+  if (req.path === '/comision-config') return next();
   if (!COMPANERA_API_KEY) return next();
   const apiKey = req.headers['x-companera-key'];
   if (apiKey !== COMPANERA_API_KEY) {

@@ -2980,6 +2980,7 @@ async function init() {
 
   // Load state
   await loadCandies();
+  await loadCompaneraCommissionState();
   loadDashboard();
   selectPaymentMethod('efectivo');  // Set default payment method
   toggleOwnerSale(false); // Por defecto aplicar comisión
