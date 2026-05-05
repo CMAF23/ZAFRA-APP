@@ -347,6 +347,13 @@
               <button id="commission-off" class="btn btn-sm btn-outline" style="border-radius:8px;font-weight:700" onclick="toggleOwnerSale(true)">Sin comisión</button>
             </div>
           </div>
+          <div class="mb-3">
+            <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Comisión compañera global</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button id="companera-commission-toggle" class="btn btn-sm" style="background:#E63946;color:#fff;border:none;border-radius:8px;font-weight:700" onclick="toggleCompaneraCommission()">Cargando…</button>
+              <span id="companera-commission-status" class="text-xs font-bold text-gray-400"></span>
+            </div>
+          </div>
           <hr class="mb-3"/>
 
           <!-- Dinero Recibido o Nombre Deudor -->
@@ -868,6 +875,7 @@ const S = {
   vendidasHoy: {},
   vendidasHoyByName: {},
   ownerSale: false, // si true -> esta venta no aplica comisión (venta del dueño)
+  companeraCommissionEnabled: true,
 };
 
 // ─── UTILS ──────────────────────────────────────────────────
@@ -1092,6 +1100,7 @@ function renderBolsasRecovery(bolsas) {
 async function loadCandiesForSale() {
   if (!S.candies.length) await loadCandies();
   $('fecha-hoy').textContent = formatDate(new Date());
+  await loadCompaneraCommissionState();
   // Cargar también el stock disponible por candy (disponibles)
   try {
     const stock = await api('/distribuciones/stock');
@@ -3025,6 +3034,52 @@ function toggleOwnerSale(flag) {
     }
   }
   calcTotals();
+}
+
+async function loadCompaneraCommissionState() {
+  try {
+    const data = await api('/companera/comision-config');
+    S.companeraCommissionEnabled = data.enabled !== false;
+  } catch {
+    S.companeraCommissionEnabled = true;
+  }
+  syncCompaneraCommissionButton();
+}
+
+function syncCompaneraCommissionButton() {
+  const btn = $('companera-commission-toggle');
+  const status = $('companera-commission-status');
+  const enabled = S.companeraCommissionEnabled !== false;
+
+  if (btn) {
+    btn.textContent = enabled ? '🛑 Desactivar 12%' : '✅ Reactivar 12%';
+    btn.style.background = enabled ? '#E63946' : '#22C55E';
+  }
+
+  if (status) {
+    status.textContent = enabled
+      ? 'Activa: nuevos tickets de compañera con 12%'
+      : 'Apagada: nuevos tickets de compañera con 0%';
+  }
+}
+
+async function toggleCompaneraCommission() {
+  const enabled = !(S.companeraCommissionEnabled !== false);
+  const question = enabled
+    ? '¿Reactivar el 12% para la compañera en los nuevos tickets?'
+    : '¿Desactivar la comisión de la compañera para los nuevos tickets?';
+  if (!confirm(question)) return;
+
+  try {
+    const data = await api('/companera/comision-config', { method: 'PATCH', body: { enabled } });
+    S.companeraCommissionEnabled = data.enabled !== false;
+    syncCompaneraCommissionButton();
+    toast(S.companeraCommissionEnabled ? '✅ Comisión de compañera activada al 12%' : '✅ Comisión de compañera desactivada', 'success');
+    loadDashboard();
+    loadTodaySales();
+  } catch (e) {
+    toast(`❌ ${e.message}`, 'error');
+  }
 }
 
 function updatePaymentDisplay() {

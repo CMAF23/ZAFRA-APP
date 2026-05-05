@@ -198,6 +198,19 @@ const ventaSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Venta = mongoose.model('Venta', ventaSchema);
 
+/** Configuración global de la app */
+const appConfigSchema = new mongoose.Schema({
+  key: { type: String, default: 'global', unique: true },
+  companeraCommissionEnabled: { type: Boolean, default: true },
+}, { timestamps: true });
+const AppConfig = mongoose.model('AppConfig', appConfigSchema);
+
+async function getOrCreateAppConfig() {
+  let config = await AppConfig.findOne({ key: 'global' });
+  if (!config) config = await AppConfig.create({ key: 'global' });
+  return config;
+}
+
 /** Semana de trabajo (Lun 00:00 → Vie 23:59) */
 const semanaSchema = new mongoose.Schema({
   fechaInicio:   { type: Date, required: true },
@@ -287,8 +300,9 @@ function getCommissionRate(candy) {
   return Math.min(rate, 1);
 }
 
-function calcDetalleComision(subtotal, candy) {
-  return parseFloat((subtotal * getCommissionRate(candy)).toFixed(2));
+function calcDetalleComision(subtotal, source) {
+  const rate = typeof source === 'number' ? source : getCommissionRate(source);
+  return parseFloat((subtotal * rate).toFixed(2));
 }
 
 /**
@@ -1500,6 +1514,9 @@ app.post('/api/companera/venta', async (req, res) => {
     }
 
     const semana = await getOrCreateCurrentWeek();
+  const config = await getOrCreateAppConfig();
+  const commissionEnabled = config.companeraCommissionEnabled !== false;
+  const commissionRateGlobal = commissionEnabled ? 0.12 : 0;
     const ahora  = new Date();
     let totalEsperado = 0;
     const detallesOk = [];
@@ -1509,8 +1526,8 @@ app.post('/api/companera/venta', async (req, res) => {
       const candy = await Candy.findById(d.candyId);
       if (!candy) continue;
       const subtotal = +d.cantidadVendida * candy.precioUnitario;
-      const commissionRate = getCommissionRate(candy);
-      const comisionCalculada = calcDetalleComision(subtotal, candy);
+      const commissionRate = commissionRateGlobal;
+      const comisionCalculada = calcDetalleComision(subtotal, commissionRateGlobal);
       totalEsperado += subtotal;
       detallesOk.push({
         candyId:         candy._id,
@@ -1538,7 +1555,7 @@ app.post('/api/companera/venta', async (req, res) => {
       totalRecibido: +totalRecibido,
       diferencia,
       comisionCalculada,
-      commissionWaived: false,
+      commissionWaived: !commissionEnabled,
       semanaId: semana._id,
       notas,
     };
@@ -1624,6 +1641,7 @@ app.get('/api/companera/ventas/hoy', async (req, res) => {
 app.get('/api/companera/comision', async (req, res) => {
   try {
     const semana = await getOrCreateCurrentWeek();
+    const config = await getOrCreateAppConfig();
     const { start: inicio, end: fin } = getZonedDayBounds();
     const ventasHoy = await Venta.find({
       source: 'companera',
@@ -1650,8 +1668,46 @@ app.get('/api/companera/comision', async (req, res) => {
         comision: +comisionHoy.toFixed(2),
         ventas:   ventasHoy.length,
       },
+      config: {
+        enabled: config.companeraCommissionEnabled !== false,
+        percentage: config.companeraCommissionEnabled !== false ? 12 : 0,
+      },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * GET /api/companera/comision-config
+ * Estado global de la comisión de compañera
+ */
+app.get('/api/companera/comision-config', async (req, res) => {
+  try {
+    const config = await getOrCreateAppConfig();
+    const enabled = config.companeraCommissionEnabled !== false;
+    res.json({ enabled, percentage: enabled ? 12 : 0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * PATCH /api/companera/comision-config
+ * Activa o desactiva la comisión global de compañera
+ */
+app.patch('/api/companera/comision-config', async (req, res) => {
+  try {
+    const { enabled } = req.body || {};
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled debe ser boolean' });
+    }
+
+    const config = await getOrCreateAppConfig();
+    config.companeraCommissionEnabled = enabled;
+    await config.save();
+
+    res.json({ enabled, percentage: enabled ? 12 : 0 });
+  } catch (e) {
+    console.error('PATCH /api/companera/comision-config:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─────────────────────────────────────────────

@@ -268,6 +268,7 @@
       <div class="lbl">💜 Mi comisión de esta semana</div>
       <div class="amount" id="comm-week">$0.00</div>
       <div class="sublbl" id="comm-dates">Cargando…</div>
+      <div class="sublbl" id="comm-mode">Comisión compañera: cargando…</div>
       <div class="comm-grid">
         <div class="comm-item">
           <div class="cv" id="comm-today">$0.00</div>
@@ -536,6 +537,9 @@ async function loadComision(){
     $('comm-today').textContent=mxn(data.hoy.comision);
     $('comm-days').textContent=data.semana.numeroDias;
     $('comm-dates').textContent=`Semana ${fmtDate(data.semana.inicio)} – ${fmtDate(data.semana.fin)}`;
+    $('comm-mode').textContent = data.config?.enabled !== false
+      ? 'Comisión compañera activa: 12% en nuevos tickets'
+      : 'Comisión compañera desactivada: 0% en nuevos tickets';
     $('comm-detail').innerHTML=`
       <div class="inv-item">
         <div><div class="inv-name">Ventas totales semana</div></div>
@@ -626,7 +630,7 @@ function renderVentaHistorial(v){
 
   let fiadoStatusBadge = '';
   let showPagadoBtn = false;
-  const comisionCero = Boolean(venta.commissionWaived || venta.ownerSale || Number(venta.comisionCalculada || 0) === 0);
+  const comisionCero = Boolean(v.commissionWaived || v.ownerSale || Number(v.comisionCalculada || 0) === 0);
   const comisionBadge = comisionCero
     ? `<span style="background:#ECFDF5;color:#047857;font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:20px">🧾 Comisión 0.0</span>`
     : '';
